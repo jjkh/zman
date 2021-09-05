@@ -9,7 +9,7 @@ const win32 = @import("win32");
 const win32_window = @import("window.zig");
 const direct2d = @import("direct2d.zig");
 const BlockWidget = @import("widgets/BlockWidget.zig");
-const Widget = @import("widgets/Widget.zig");
+const LabelWidget = @import("widgets/LabelWidget.zig");
 
 const WINAPI = std.os.windows.WINAPI;
 const L = win32.zig.L;
@@ -188,6 +188,7 @@ fn paint() !void {
     const third_rect = third_size.toRect();
 
     var inner_widgets: [9]BlockWidget = undefined;
+    var inner_labels: [9]LabelWidget = undefined;
     for (inner_widgets) |*widget, i| {
         const offset = .{
             .x = third_size.x * @intToFloat(f32, i % 3),
@@ -195,8 +196,11 @@ fn paint() !void {
         };
         widget.* = BlockWidget.init(third_rect.addPoint(offset).grow(-10), inner_bg_brush);
         main_widget.addChild(widget);
+        widget.border = .{ .brush = red_brush, .width = 2 };
 
-        if (i == 4) widget.border = .{ .brush = red_brush, .width = 1 };
+        const label_rect = widget.relRect().size().toRect().grow(-10);
+        inner_labels[i] = LabelWidget.init(label_rect, "test", text_format, text_brush);
+        widget.addChild(&inner_labels[i]);
     }
     try main_widget.paint(&d2d);
 }

@@ -1,6 +1,7 @@
-widget: Widget,
 bg_brush: SolidColorBrush,
 border: ?BorderStyle = null,
+
+widget: Widget,
 
 const BlockWidget = @This();
 
@@ -12,12 +13,12 @@ const Direct2D = direct2d.Direct2D;
 const SolidColorBrush = direct2d.SolidColorBrush;
 const RectF = direct2d.RectF;
 
-const BorderStyle = struct {
+pub const BorderStyle = struct {
     brush: SolidColorBrush,
     width: f32,
 };
 
-fn paintFn(w: *Widget, d2d: *Direct2D) Widget.PaintError!void {
+fn paintFn(w: *Widget, d2d: *Direct2D) anyerror!void {
     const self = @fieldParentPtr(BlockWidget, "widget", w);
     d2d.fillRect(w.absRect(), self.bg_brush);
 
@@ -32,14 +33,14 @@ pub fn init(rect: RectF, bg_brush: SolidColorBrush) BlockWidget {
     };
 }
 
-pub fn setBorderStyle(self: *BlockWidget, style: ?BorderStyle) void {
-    self.border = style;
-}
-
 pub fn paint(self: *BlockWidget, d2d: *Direct2D) !void {
     return self.widget.paint(d2d);
 }
 
 pub fn addChild(self: *BlockWidget, child: anytype) void {
     self.widget.addChild(&child.widget);
+}
+
+pub fn relRect(self: BlockWidget) RectF {
+    return self.widget.rect;
 }
