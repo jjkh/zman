@@ -179,6 +179,19 @@ pub const Color = struct {
     b: f32,
     a: f32 = 1,
 
+    pub const Black = Color{ .r = 0, .g = 0, .b = 0 };
+    pub const White = Color{ .r = 1, .g = 1, .b = 1 };
+    pub const LightGray = Color{ .r = 0.75, .g = 0.75, .b = 0.75 };
+    pub const Gray = Color{ .r = 0.5, .g = 0.5, .b = 0.5 };
+    pub const DarkGray = Color{ .r = 0.25, .g = 0.25, .b = 0.25 };
+
+    pub const Red = Color{ .r = 1, .g = 0, .b = 0 };
+    pub const Green = Color{ .r = 0, .g = 1, .b = 0 };
+    pub const Blue = Color{ .r = 0, .g = 0, .b = 1 };
+    pub const Yellow = Color{ .r = 1, .g = 1, .b = 0 };
+    pub const Magenta = Color{ .r = 1, .g = 0, .b = 1 };
+    pub const Cyan = Color{ .r = 0, .g = 1, .b = 1 };
+
     pub fn fromU8(rgba: struct { r: u8, g: u8, b: u8, a: u8 = 255 }) Color {
         return .{
             .r = @intToFloat(f32, rgba.r) / 255,
@@ -257,19 +270,41 @@ test "Color" {
 
 /// created with Direct2D.createSolidBrush()
 pub const SolidColorBrush = struct {
-    brush: *ID2D1SolidColorBrush,
     color: Color,
+    brush_ptr: ?*ID2D1SolidColorBrush = null,
 
     pub fn deinit(self: *SolidColorBrush) void {
         trace(@src(), .{});
-        safeRelease(&self.brush);
+
+        if (self.brush_ptr) |*brush_ptr| safeRelease(brush_ptr);
+        self.brush_ptr = null;
     }
 
-    pub fn setColor(self: *SolidColorBrush, color: Color) void {
-        trace(@src(), .{color});
+    pub fn brush(self: *SolidColorBrush, d2d: *Direct2D, reuse_existing: enum { REUSE, RECREATE }) !*ID2D1SolidColorBrush {
+        trace(@src(), .{self.color});
 
-        self.brush.ID2D1SolidColorBrush_SetColor(&color.toD2DColorF());
-        self.color = color;
+        if (self.brush_ptr) |brush_ptr| {
+            if (reuse_existing == .REUSE)
+                return brush_ptr;
+
+            self.deinit();
+        }
+
+        if (d2d.render_target) |render_target| {
+            const result = render_target.ID2D1RenderTarget_CreateSolidColorBrush(
+                &self.color.toD2DColorF(),
+                null,
+                @ptrCast(*?*ID2D1SolidColorBrush, &self.brush_ptr),
+            );
+            if (FAILED(result) or self.brush_ptr == null) {
+                self.brush_ptr = null;
+                return error.CreateBrushFailed;
+            }
+
+            return self.brush_ptr.?;
+        }
+
+        return error.NoRenderTarget;
     }
 };
 
@@ -401,30 +436,12 @@ pub const Direct2D = struct {
     pub fn deinitRenderTarget(self: *Direct2D) void {
         trace(@src(), .{});
 
+        log.warn("Only releasing render target...", .{});
+
         if (self.render_target) |render_target|
             safeRelease(&render_target);
 
         self.render_target = null;
-    }
-
-    /// device-dependent
-    pub fn createSolidBrush(self: *Direct2D, color: Color) !SolidColorBrush {
-        trace(@src(), .{color});
-
-        if (self.render_target) |render_target| {
-            var brush = SolidColorBrush{ .brush = undefined, .color = color };
-            const result = render_target.ID2D1RenderTarget_CreateSolidColorBrush(
-                &color.toD2DColorF(),
-                null,
-                @ptrCast(*?*ID2D1SolidColorBrush, &brush.brush),
-            );
-            if (FAILED(result))
-                return error.CreateBrushFailed;
-
-            return brush;
-        }
-
-        return error.NoRenderTarget;
     }
 
     /// device-independent
@@ -441,7 +458,6 @@ pub const Direct2D = struct {
             size,
             // L(""), // doesn't work with empty string? seems wrong...
             &[0:0]u16{}, // however this works??
-            // L("en-us"),
             &text_format,
         );
 
@@ -533,20 +549,19 @@ pub const Direct2D = struct {
             log.err("clear called but render target not initialised", .{});
     }
 
-    pub fn fillRect(self: *Direct2D, rect: RectF, brush: SolidColorBrush) void {
+    pub fn fillRect(self: *Direct2D, rect: RectF, brush: *SolidColorBrush) !void {
         trace(@src(), .{rect});
 
-        if (self.render_target) |render_target|
-            render_target.ID2D1RenderTarget_FillRectangle(&rect.toD2DRectF(), @ptrCast(*ID2D1Brush, brush.brush))
-        else
-            log.err("fillRect called but render target not initialised", .{});
+        if (self.render_target) |render_target| {
+            render_target.ID2D1RenderTarget_FillRectangle(&rect.toD2DRectF(), @ptrCast(*ID2D1Brush, try brush.brush(self, .REUSE)));
+        } else log.err("fillRect called but render target not initialised", .{});
     }
 
-    pub fn outlineRect(self: *Direct2D, rect: RectF, width: f32, brush: SolidColorBrush) void {
+    pub fn outlineRect(self: *Direct2D, rect: RectF, width: f32, brush: *SolidColorBrush) !void {
         trace(@src(), .{rect});
 
         if (self.render_target) |render_target|
-            render_target.ID2D1RenderTarget_DrawRectangle(&rect.toD2DRectF(), @ptrCast(*ID2D1Brush, brush.brush), width, null)
+            render_target.ID2D1RenderTarget_DrawRectangle(&rect.toD2DRectF(), @ptrCast(*ID2D1Brush, try brush.brush(self, .REUSE)), width, null)
         else
             log.err("outlineRect called but render target not initialised", .{});
     }
@@ -576,7 +591,7 @@ pub const Direct2D = struct {
         text: [:0]const u16,
         text_format: TextFormat,
         rect: RectF,
-        brush: SolidColorBrush,
+        brush: *SolidColorBrush,
     ) !void {
         trace(@src(), .{text});
 
@@ -586,7 +601,7 @@ pub const Direct2D = struct {
                 @intCast(u32, text.len),
                 text_format.text_format,
                 &rect.toD2DRectF(),
-                @ptrCast(*ID2D1Brush, brush.brush),
+                @ptrCast(*ID2D1Brush, try brush.brush(self, .REUSE)),
                 D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
                 DWRITE_MEASURING_MODE_NATURAL,
             )
@@ -602,10 +617,11 @@ pub const Direct2D = struct {
         text: []const u8,
         text_format: TextFormat,
         rect: RectF,
-        brush: SolidColorBrush,
+        brush: *SolidColorBrush,
     ) !void {
         trace(@src(), .{text});
         const w_text = try std.unicode.utf8ToUtf16LeWithNull(allocator, text);
+        defer allocator.free(w_text);
         try self.drawTextW(w_text, text_format, rect, brush);
     }
 
@@ -615,7 +631,7 @@ pub const Direct2D = struct {
         text: []const u8,
         text_format: TextFormat,
         rect: RectF,
-        brush: SolidColorBrush,
+        brush: *SolidColorBrush,
     ) !void {
         const len = try std.unicode.utf8ToUtf16Le(buf, text);
         buf[len] = 0;
@@ -627,7 +643,7 @@ pub const Direct2D = struct {
         self: *Direct2D,
         text_layout: TextLayout,
         origin: PointF,
-        default_fill_brush: SolidColorBrush,
+        default_fill_brush: *SolidColorBrush,
     ) !void {
         trace(@src(), .{});
 
@@ -635,7 +651,7 @@ pub const Direct2D = struct {
             _ = render_target.ID2D1RenderTarget_DrawTextLayout(
                 .{ .x = origin.x, .y = origin.y },
                 text_layout.text_layout,
-                @ptrCast(*ID2D1Brush, default_fill_brush.brush),
+                @ptrCast(*ID2D1Brush, try default_fill_brush.brush(self, .REUSE)),
                 D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
             );
         } else {

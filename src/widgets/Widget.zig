@@ -1,35 +1,42 @@
 rect: RectF,
-parent: ?*Widget = null,
-node: ChildList.Node = undefined,
-children: ChildList = .{},
 paintFn: fn (*Widget, *Direct2D) anyerror!void,
+deinitFn: ?fn (*Widget) void,
+resizeFn: ?fn (*Widget, RectF) void = null,
+
+parent: ?*Widget = null,
+first_child: ?*Widget = null,
+next_sibling: ?*Widget = null,
 
 const Widget = @This();
 const std = @import("std");
 const direct2d = @import("../direct2d.zig");
+const trace = @import("../trace.zig").trace;
 
 const Direct2D = direct2d.Direct2D;
 const RectF = direct2d.RectF;
 const log = std.log.scoped(.widget);
 
-// pub const PaintError = error{};
-pub const ChildList = std.SinglyLinkedList(*Widget);
+pub const ChildList = std.SinglyLinkedList(*Widget).Node;
 
-pub fn init(rect: RectF, paintFn: fn (*Widget, *Direct2D) anyerror!void) Widget {
-    var widget = Widget{
-        .rect = rect,
-        .paintFn = paintFn,
-    };
+pub fn deinit(self: *Widget) void {
+    trace(@src(), .{self});
 
-    return widget;
+    var it = self.first_child;
+    while (it) |child| {
+        it = child.next_sibling;
+        child.deinit();
+    }
+    self.first_child = null;
+
+    if (self.deinitFn) |deinitFunc| deinitFunc(self);
 }
 
 pub fn paint(self: *Widget, d2d: *Direct2D) anyerror!void {
     try self.paintFn(self, d2d);
 
-    var it = self.children.first;
-    while (it) |child| : (it = child.next)
-        try child.data.paint(d2d);
+    var it = self.first_child;
+    while (it) |child| : (it = child.next_sibling)
+        try child.paint(d2d);
 }
 
 pub fn absRect(self: Widget) RectF {
@@ -39,9 +46,17 @@ pub fn absRect(self: Widget) RectF {
         return self.rect;
 }
 
-// TODO: something better than this - can't call from init due to references being made to old copies
 pub fn addChild(self: *Widget, child: *Widget) void {
-    child.node = .{ .data = child };
-    self.children.prepend(&child.node);
-    child.node.data.parent = self;
+    trace(@src(), .{ self, child });
+
+    child.parent = self;
+    child.next_sibling = self.first_child;
+    self.first_child = child;
+}
+
+pub fn resize(self: *Widget, new_rect: RectF) void {
+    trace(@src(), .{ self, new_rect });
+
+    self.rect = new_rect;
+    if (self.resizeFn) |resizeFunc| resizeFunc(self, new_rect);
 }

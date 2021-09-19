@@ -10,21 +10,25 @@ const win32_window = @import("window.zig");
 const direct2d = @import("direct2d.zig");
 const BlockWidget = @import("widgets/BlockWidget.zig");
 const LabelWidget = @import("widgets/LabelWidget.zig");
+const ListBoxWidget = @import("widgets/ListBoxWidget.zig");
+const SplitWidget = @import("widgets/SplitWidget.zig");
 
 const WINAPI = std.os.windows.WINAPI;
 const L = win32.zig.L;
 const HWND = win32.foundation.HWND;
 const wam = win32.ui.windows_and_messaging;
+const Color = direct2d.Color;
 
 const log = std.log.scoped(.default);
 
 var window: win32_window.SimpleWindow = undefined;
 var d2d: direct2d.Direct2D = undefined;
+var main_widget: *SplitWidget = undefined;
+var paint_called: bool = false;
 
 var text_format: direct2d.TextFormat = undefined;
-var text_brush: direct2d.SolidColorBrush = undefined;
 
-var red_brush: direct2d.SolidColorBrush = undefined;
+var gpa: std.heap.GeneralPurposeAllocator(.{ .safety = true }) = undefined;
 
 fn utf16Encode(c: u21) ![2]u16 {
     switch (c) {
@@ -58,13 +62,14 @@ fn utf16DecodeAllocZ(allocator: *std.mem.Allocator, string: []u21) ![:0]u16 {
 }
 
 const WmMsg = enum(u32) {
+    CREATE = wam.WM_CREATE,
     PAINT = wam.WM_PAINT,
     SIZE = wam.WM_SIZE,
     DESTROY = wam.WM_DESTROY,
-    // SET_FOCUS = wam.WM_SETFOCUS,
-    // KILL_FOCUS = wam.WM_KILLFOCUS,
-    // CHAR = wam.WM_CHAR,
-    // SYS_CHAR = wam.WM_SYSCHAR,
+    SET_FOCUS = wam.WM_SETFOCUS,
+    KILL_FOCUS = wam.WM_KILLFOCUS,
+    CHAR = wam.WM_CHAR,
+    SYS_CHAR = wam.WM_SYSCHAR,
     _,
 };
 
@@ -72,16 +77,12 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
     trace(@src(), .{@intToEnum(WmMsg, msg)});
 
     switch (@intToEnum(WmMsg, msg)) {
-        .PAINT => paint() catch |err| {
-            log.err("{}", .{err});
+        .PAINT => {
+            paint() catch |err| log.err("paint: {}", .{err});
+            paint_called = true;
             return -1;
         },
-        .SIZE => {
-            d2d.resize() catch |err| {
-                log.err("{}", .{err});
-                return -1;
-            };
-        },
+        .SIZE => d2d.resize() catch |err| log.err("d2d.resize: {}", .{err}),
         .DESTROY => {
             log.debug("destroying window", .{});
             wam.PostQuitMessage(0);
@@ -167,6 +168,43 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
 //     try caret.show();
 // }
 
+fn createWidgets() !*SplitWidget {
+    trace(@src(), .{});
+
+    main_widget = try SplitWidget.init(&gpa.allocator, .{}, .Vertical, null);
+    {
+        var child1 = try BlockWidget.init(&gpa.allocator, .{}, Color.Gray, null);
+        try main_widget.addWidget(child1);
+
+        {
+            var child2 = try SplitWidget.init(&gpa.allocator, .{}, .Horizontal, null);
+            try main_widget.addWidget(child2);
+
+            var child3 = try BlockWidget.init(&gpa.allocator, .{}, Color.LightGray, null);
+            try child2.addWidget(child3);
+
+            var child4 = try SplitWidget.init(&gpa.allocator, .{}, .Vertical, null);
+            try child2.addWidget(child4);
+            {
+                var child6 = try BlockWidget.init(&gpa.allocator, .{}, Color.Yellow, null);
+                try child4.addWidget(child6);
+
+                var child7 = try BlockWidget.init(&gpa.allocator, .{}, Color.Cyan, null);
+                try child4.addWidget(child7);
+            }
+
+            var child5 = try BlockWidget.init(&gpa.allocator, .{}, Color.LightGray, null);
+            try child2.addWidget(child5);
+        }
+
+        var list_box_widget = try ListBoxWidget.init(&gpa.allocator, .{}, text_format, Color.Black, &[_][]const u8{ "test1", "test2", "test3" }, null);
+        try list_box_widget.addItem("test4");
+        try list_box_widget.addItem("test5");
+        try main_widget.addWidget(list_box_widget);
+    }
+    return main_widget;
+}
+
 fn paint() !void {
     trace(@src(), .{});
 
@@ -174,39 +212,23 @@ fn paint() !void {
     defer d2d.endDraw() catch {};
 
     d2d.clear(direct2d.Color.fromU24(.{ .rgb = 0x337766 }));
+    try recalculateSizes();
 
-    var bg_brush = try d2d.createSolidBrush(direct2d.Color{ .r = 1.0, .g = 0.8, .b = 0.8 });
-    defer bg_brush.deinit();
-
-    var inner_bg_brush = try d2d.createSolidBrush(direct2d.Color{ .r = 0.6, .g = 0.8, .b = 0.8 });
-    defer inner_bg_brush.deinit();
-
-    const bounds = (try d2d.getSize()).toRect();
-    var main_widget = BlockWidget.init(bounds.grow(-40), bg_brush);
-
-    const third_size = main_widget.widget.rect.size().scale(0.3333);
-    const third_rect = third_size.toRect();
-
-    var inner_widgets: [9]BlockWidget = undefined;
-    var inner_labels: [9]LabelWidget = undefined;
-    for (inner_widgets) |*widget, i| {
-        const offset = .{
-            .x = third_size.x * @intToFloat(f32, i % 3),
-            .y = third_size.y * @intToFloat(f32, i / 3),
-        };
-        widget.* = BlockWidget.init(third_rect.addPoint(offset).grow(-10), inner_bg_brush);
-        main_widget.addChild(widget);
-        widget.border = .{ .brush = red_brush, .width = 2 };
-
-        const label_rect = widget.relRect().size().toRect().grow(-10);
-        inner_labels[i] = LabelWidget.init(label_rect, "test", text_format, text_brush);
-        widget.addChild(&inner_labels[i]);
-    }
     try main_widget.paint(&d2d);
+    log.debug("painted widget", .{});
+}
+
+fn recalculateSizes() !void {
+    trace(@src(), .{});
+
+    const new_size = try d2d.getSize();
+    main_widget.resize(new_size.toRect().grow(-20));
 }
 
 pub fn main() !void {
     trace(@src(), .{});
+    gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
+    defer _ = gpa.deinit();
 
     // TODO: use manifest for utf-8 xxxA functions instead of this
     // configure console for utf-8 output
@@ -227,15 +249,15 @@ pub fn main() !void {
     text_format = try d2d.createTextFormat("SegoeUI", 20);
     defer text_format.deinit();
 
-    text_brush = try d2d.createSolidBrush(direct2d.Color{ .r = 0.7, .g = 0.0, .b = 0.1 });
-    defer text_brush.deinit();
-
-    red_brush = try d2d.createSolidBrush(direct2d.Color{ .r = 1.0, .g = 0.0, .b = 0.0 });
-    defer red_brush.deinit();
-
     // show the window
     window.show();
 
+    main_widget = try createWidgets();
+    log.debug("created widget", .{});
+
     // handle windows messages
     while (win32_window.processMessage()) {}
+
+    // cleanup all widgets
+    main_widget.deinit();
 }
