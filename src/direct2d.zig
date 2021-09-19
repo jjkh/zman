@@ -170,6 +170,13 @@ pub const RectF = struct {
     pub fn centerWithin(self: RectF, outer: RectF) RectF {
         return self.addPoint(outer.centerPoint().sub(self.centerPoint()));
     }
+
+    pub fn format(self: RectF, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
+
+        try std.fmt.format(writer, "{{{d}, {d}, {d}, {d}}}", .{ self.top, self.bottom, self.left, self.right });
+    }
 };
 
 // extension of D2D1_COLOR_F with helper functions

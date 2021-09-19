@@ -1,5 +1,6 @@
 bg_color: Color,
 border_style: ?BorderStyle = null,
+padding: f32 = 0,
 
 allocator: *Allocator,
 widget: Widget,

@@ -58,5 +58,12 @@ pub fn resize(self: *Widget, new_rect: RectF) void {
     trace(@src(), .{ self, new_rect });
 
     self.rect = new_rect;
-    if (self.resizeFn) |resizeFunc| resizeFunc(self, new_rect);
+
+    if (self.resizeFn) |resizeFunc| {
+        resizeFunc(self, new_rect);
+    } else {
+        var it = self.first_child;
+        while (it) |child| : (it = child.next_sibling)
+            child.resize(new_rect.addPoint(self.rect.topLeft().neg()));
+    }
 }

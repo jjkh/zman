@@ -93,7 +93,7 @@ pub fn addItem(self: *ListBoxWidget, text: []const u8) !void {
 }
 
 pub fn setTextColor(self: *ListBoxWidget, new_color: Color) void {
-    if (std.mem.eql(u8, std.mem.asBytes(&new_color), std.mem.asBytes(&self.text_color))) return;
+    if (new_color.toU32() == self.text_color.toU32()) return;
 
     for (self.labels.items) |label|
         label.text_color = new_color;

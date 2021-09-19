@@ -20,19 +20,35 @@ const wam = win32.ui.windows_and_messaging;
 const Color = direct2d.Color;
 
 const log = std.log.scoped(.default);
+pub const log_level: std.log.Level = .info;
 
 var window: win32_window.SimpleWindow = undefined;
 var d2d: direct2d.Direct2D = undefined;
 
+const border_color = Color.fromU32(0x262C38FF);
+const primary_bg_color = Color.fromU32(0x0D1017FF);
+const primary_text_color = Color.fromU32(0xBFBDB6FF);
+const secondary_bg_color = Color.fromU32(0x0B0E14FF);
+const secondary_text_color = Color.fromU32(0x646B73FF);
+
 var text_format: direct2d.TextFormat = undefined;
 
-var main_widget: *SplitWidget = undefined;
-var pane_left: *ListBoxWidget = undefined;
-var pane_right: *ListBoxWidget = undefined;
-var first_surrogate_half: u16 = 0;
-var current_pane: enum { Left, Right } = .Left;
+const DirPane = struct {
+    block: *BlockWidget,
+    list: *ListBoxWidget,
+    // statusBar: *LabelWidget,
+};
 
-var gpa: std.heap.GeneralPurposeAllocator(.{ .safety = true }) = undefined;
+var app = struct {
+    main_widget: *SplitWidget = undefined,
+    left: DirPane = undefined,
+    right: DirPane = undefined,
+    active_pane: enum { Left, Right } = .Left,
+}{};
+
+var first_surrogate_half: u16 = 0;
+
+var gpa: std.heap.GeneralPurposeAllocator(.{}) = undefined;
 
 fn utf16Encode(c: u21) ![2]u16 {
     switch (c) {
@@ -129,6 +145,29 @@ const CharFlags = packed struct {
     transition_state: enum(u1) { Released = 0, Pressed = 1 },
 };
 
+fn toggleActivePane() void {
+    if (app.active_pane == .Left) {
+        app.active_pane = .Right;
+        app.left.block.bg_color = secondary_bg_color;
+        app.left.block.border_style = null;
+        app.left.list.setTextColor(secondary_text_color);
+
+        app.right.block.bg_color = primary_bg_color;
+        app.right.block.border_style = .{ .width = 1, .color = border_color };
+        app.right.list.setTextColor(primary_text_color);
+    } else {
+        app.active_pane = .Left;
+        app.left.block.bg_color = primary_bg_color;
+        app.left.block.border_style = .{ .width = 1, .color = border_color };
+        app.left.list.setTextColor(primary_text_color);
+
+        app.right.block.bg_color = secondary_bg_color;
+        app.right.block.border_style = null;
+        app.right.list.setTextColor(secondary_text_color);
+    }
+    window.invalidate(.ERASE) catch {};
+}
+
 fn handleChar(char: []u16, flags: CharFlags) void {
     var it = std.unicode.Utf16LeIterator.init(char);
     _ = flags;
@@ -145,16 +184,7 @@ fn handleChar(char: []u16, flags: CharFlags) void {
         //     text_changed = true;
         // },
         '\t' => {
-            if (current_pane == .Left) {
-                current_pane = .Right;
-                pane_left.setTextColor(Color.LightGray);
-                pane_right.setTextColor(Color.White);
-            } else {
-                current_pane = .Left;
-                pane_left.setTextColor(Color.White);
-                pane_right.setTextColor(Color.LightGray);
-            }
-            window.invalidate(.NO_ERASE) catch {};
+            toggleActivePane();
             return;
         },
         0x1B => {
@@ -200,18 +230,25 @@ fn populateDirEntries(path: []const u8, list_box: *ListBoxWidget) !void {
 fn createWidgets() !*SplitWidget {
     trace(@src(), .{});
 
-    main_widget = try SplitWidget.init(&gpa.allocator, .{}, .Horizontal, null);
+    app.main_widget = try SplitWidget.init(&gpa.allocator, .{}, .Horizontal, null);
 
-    pane_left = try ListBoxWidget.init(&gpa.allocator, .{}, text_format, Color.White, null, null);
-    try main_widget.addWidget(pane_left);
+    app.left = .{
+        .block = try BlockWidget.init(&gpa.allocator, .{}, primary_bg_color, null),
+        .list = try ListBoxWidget.init(&gpa.allocator, .{}, text_format, primary_text_color, null, app.left.block),
+    };
+    app.left.block.border_style = .{ .width = 1, .color = border_color };
+    try app.main_widget.addWidget(app.left.block);
 
-    pane_right = try ListBoxWidget.init(&gpa.allocator, .{}, text_format, Color.White, null, null);
-    try main_widget.addWidget(pane_right);
+    app.right = .{
+        .block = try BlockWidget.init(&gpa.allocator, .{}, secondary_bg_color, null),
+        .list = try ListBoxWidget.init(&gpa.allocator, .{}, text_format, secondary_text_color, null, app.right.block),
+    };
+    try app.main_widget.addWidget(app.right.block);
 
-    try populateDirEntries("C:\\", pane_left);
-    try populateDirEntries(".", pane_right);
+    try populateDirEntries("C:\\", app.left.list);
+    try populateDirEntries("D:\\dev\\source", app.right.list);
 
-    return main_widget;
+    return app.main_widget;
 }
 
 fn paint() !void {
@@ -223,7 +260,7 @@ fn paint() !void {
     d2d.clear(Color.DarkGray);
     try recalculateSizes();
 
-    try main_widget.paint(&d2d);
+    try app.main_widget.paint(&d2d);
     log.debug("painted widget", .{});
 }
 
@@ -231,12 +268,12 @@ fn recalculateSizes() !void {
     trace(@src(), .{});
 
     const new_size = try d2d.getSize();
-    main_widget.resize(new_size.toRect());
+    app.main_widget.resize(new_size.toRect());
 }
 
 pub fn main() !void {
     trace(@src(), .{});
-    gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
+    gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
 
     // TODO: use manifest for utf-8 xxxA functions instead of this
@@ -247,7 +284,7 @@ pub fn main() !void {
     defer _ = win32.system.console.SetConsoleOutputCP(old_codepage);
 
     // create a window
-    window = try win32_window.SimpleWindow.init("test", "testClass", windowProc);
+    window = try win32_window.SimpleWindow.init("zman", "zmanClass", windowProc);
     defer window.deinit();
 
     // init the d2d instance
@@ -255,18 +292,18 @@ pub fn main() !void {
     defer d2d.deinit();
 
     // create a default font
-    text_format = try d2d.createTextFormat("SegoeUI", 20);
+    text_format = try d2d.createTextFormat("SegoeUI", 13.5);
     defer text_format.deinit();
 
     // show the window
     window.show();
 
-    main_widget = try createWidgets();
+    app.main_widget = try createWidgets();
     log.debug("created widget", .{});
 
     // handle windows messages
     while (win32_window.processMessage()) {}
 
     // cleanup all widgets
-    main_widget.deinit();
+    app.main_widget.deinit();
 }
