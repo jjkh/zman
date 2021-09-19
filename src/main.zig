@@ -23,10 +23,14 @@ const log = std.log.scoped(.default);
 
 var window: win32_window.SimpleWindow = undefined;
 var d2d: direct2d.Direct2D = undefined;
-var main_widget: *SplitWidget = undefined;
-var paint_called: bool = false;
 
 var text_format: direct2d.TextFormat = undefined;
+
+var main_widget: *SplitWidget = undefined;
+var pane_left: *ListBoxWidget = undefined;
+var pane_right: *ListBoxWidget = undefined;
+var first_surrogate_half: u16 = 0;
+var current_pane: enum { Left, Right } = .Left;
 
 var gpa: std.heap.GeneralPurposeAllocator(.{ .safety = true }) = undefined;
 
@@ -79,7 +83,6 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
     switch (@intToEnum(WmMsg, msg)) {
         .PAINT => {
             paint() catch |err| log.err("paint: {}", .{err});
-            paint_called = true;
             return -1;
         },
         .SIZE => d2d.resize() catch |err| log.err("d2d.resize: {}", .{err}),
@@ -95,66 +98,80 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
         //     log.err("{}", .{err});
         //     return -1;
         // },
-        // .CHAR => {
-        //     const char = @intCast(u16, w_param);
-        //     const flags = @bitCast(CharFlags, @intCast(u32, l_param));
+        .CHAR => {
+            const char = @intCast(u16, w_param);
+            const flags = @bitCast(CharFlags, @intCast(u32, l_param));
 
-        //     if (char > 0xD800 and char < 0xDC00) {
-        //         first_surrogate_half = char;
-        //     } else {
-        //         if (first_surrogate_half == 0)
-        //             handleChar(&[1]u16{char}, flags)
-        //         else
-        //             handleChar(&[2]u16{ first_surrogate_half, char }, flags);
+            if (char > 0xD800 and char < 0xDC00) {
+                first_surrogate_half = char;
+            } else {
+                if (first_surrogate_half == 0)
+                    handleChar(&[1]u16{char}, flags)
+                else
+                    handleChar(&[2]u16{ first_surrogate_half, char }, flags);
 
-        //         first_surrogate_half = 0;
-        //     }
-        // },
+                first_surrogate_half = 0;
+            }
+        },
         else => return wam.DefWindowProc(hwnd, msg, w_param, l_param),
     }
 
     return 0;
 }
 
-// const CharFlags = packed struct {
-//     repeat_count: u16,
-//     scan_code: u8,
-//     reserved: u4,
-//     extended: bool,
-//     context_code: bool,
-//     previous_key_state: enum(u1) { Down = 0, Up = 1 },
-//     transition_state: enum(u1) { Released = 0, Pressed = 1 },
-// };
+const CharFlags = packed struct {
+    repeat_count: u16,
+    scan_code: u8,
+    reserved: u4,
+    extended: bool,
+    context_code: bool,
+    previous_key_state: enum(u1) { Down = 0, Up = 1 },
+    transition_state: enum(u1) { Released = 0, Pressed = 1 },
+};
 
-// fn handleChar(char: []u16, flags: CharFlags) void {
-//     var it = std.unicode.Utf16LeIterator.init(char);
+fn handleChar(char: []u16, flags: CharFlags) void {
+    var it = std.unicode.Utf16LeIterator.init(char);
+    _ = flags;
 
-//     const c = it.nextCodepoint() catch unreachable orelse return;
+    const c = it.nextCodepoint() catch unreachable orelse return;
 
-//     // handle special characters (as listed in MSDN)
-//     switch (c) {
-//         0x08 => {
-//             // backspace
-//             input_text.dropRight(flags.repeat_count) catch {};
+    // handle special characters (as listed in MSDN)
+    switch (c) {
+        // 0x08 => {
+        //     // backspace
+        //     input_text.dropRight(flags.repeat_count) catch {};
 
-//             window.invalidate(.ERASE) catch {};
-//             text_changed = true;
-//         },
-//         0x1B => {
-//             // escape
-//             wam.PostQuitMessage(0);
-//             return;
-//         },
-//         else => {
-//             var i: i32 = flags.repeat_count;
-//             while (i > 0) : (i -= 1) {
-//                 input_text.append(c) catch {};
-//             }
-//             window.invalidate(.NO_ERASE) catch {};
-//             text_changed = true;
-//         },
-//     }
-// }
+        //     window.invalidate(.ERASE) catch {};
+        //     text_changed = true;
+        // },
+        '\t' => {
+            if (current_pane == .Left) {
+                current_pane = .Right;
+                pane_left.setTextColor(Color.LightGray);
+                pane_right.setTextColor(Color.White);
+            } else {
+                current_pane = .Left;
+                pane_left.setTextColor(Color.White);
+                pane_right.setTextColor(Color.LightGray);
+            }
+            window.invalidate(.NO_ERASE) catch {};
+            return;
+        },
+        0x1B => {
+            // escape
+            wam.PostQuitMessage(0);
+            return;
+        },
+        else => {
+            // var i: i32 = flags.repeat_count;
+            // while (i > 0) : (i -= 1) {
+            //     input_text.append(c) catch {};
+            // }
+            // window.invalidate(.NO_ERASE) catch {};
+            // text_changed = true;
+        },
+    }
+}
 
 // fn showCursor() !void {
 //     trace(@src(), .{});
@@ -168,40 +185,32 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
 //     try caret.show();
 // }
 
+fn populateDirEntries(path: []const u8, list_box: *ListBoxWidget) !void {
+    const dir = try std.fs.cwd().openDir(
+        path,
+        .{ .iterate = true },
+    );
+
+    var iter = dir.iterate();
+    while (try iter.next()) |entry| {
+        try list_box.addItem(entry.name);
+    }
+}
+
 fn createWidgets() !*SplitWidget {
     trace(@src(), .{});
 
-    main_widget = try SplitWidget.init(&gpa.allocator, .{}, .Vertical, null);
-    {
-        var child1 = try BlockWidget.init(&gpa.allocator, .{}, Color.Gray, null);
-        try main_widget.addWidget(child1);
+    main_widget = try SplitWidget.init(&gpa.allocator, .{}, .Horizontal, null);
 
-        {
-            var child2 = try SplitWidget.init(&gpa.allocator, .{}, .Horizontal, null);
-            try main_widget.addWidget(child2);
+    pane_left = try ListBoxWidget.init(&gpa.allocator, .{}, text_format, Color.White, null, null);
+    try main_widget.addWidget(pane_left);
 
-            var child3 = try BlockWidget.init(&gpa.allocator, .{}, Color.LightGray, null);
-            try child2.addWidget(child3);
+    pane_right = try ListBoxWidget.init(&gpa.allocator, .{}, text_format, Color.White, null, null);
+    try main_widget.addWidget(pane_right);
 
-            var child4 = try SplitWidget.init(&gpa.allocator, .{}, .Vertical, null);
-            try child2.addWidget(child4);
-            {
-                var child6 = try BlockWidget.init(&gpa.allocator, .{}, Color.Yellow, null);
-                try child4.addWidget(child6);
+    try populateDirEntries("C:\\", pane_left);
+    try populateDirEntries(".", pane_right);
 
-                var child7 = try BlockWidget.init(&gpa.allocator, .{}, Color.Cyan, null);
-                try child4.addWidget(child7);
-            }
-
-            var child5 = try BlockWidget.init(&gpa.allocator, .{}, Color.LightGray, null);
-            try child2.addWidget(child5);
-        }
-
-        var list_box_widget = try ListBoxWidget.init(&gpa.allocator, .{}, text_format, Color.Black, &[_][]const u8{ "test1", "test2", "test3" }, null);
-        try list_box_widget.addItem("test4");
-        try list_box_widget.addItem("test5");
-        try main_widget.addWidget(list_box_widget);
-    }
     return main_widget;
 }
 
@@ -211,7 +220,7 @@ fn paint() !void {
     try d2d.beginDraw();
     defer d2d.endDraw() catch {};
 
-    d2d.clear(direct2d.Color.fromU24(.{ .rgb = 0x337766 }));
+    d2d.clear(Color.DarkGray);
     try recalculateSizes();
 
     try main_widget.paint(&d2d);
@@ -222,7 +231,7 @@ fn recalculateSizes() !void {
     trace(@src(), .{});
 
     const new_size = try d2d.getSize();
-    main_widget.resize(new_size.toRect().grow(-20));
+    main_widget.resize(new_size.toRect());
 }
 
 pub fn main() !void {

@@ -1,6 +1,6 @@
-inner_widgets: ArrayList(*Widget),
 orientation: SplitOrientation,
 
+inner_widgets: ArrayList(*Widget),
 allocator: *Allocator,
 widget: Widget,
 

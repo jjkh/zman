@@ -56,7 +56,7 @@ pub fn init(
     rect: RectF,
     text_format: TextFormat,
     text_color: Color,
-    items: []const []const u8,
+    items: ?[]const []const u8,
     parent: anytype,
 ) !*ListBoxWidget {
     trace(@src(), .{ rect, parent });
@@ -65,7 +65,7 @@ pub fn init(
     list_box_widget.* = ListBoxWidget{
         .text_format = text_format,
         .text_color = text_color,
-        .labels = try ArrayList(*LabelWidget).initCapacity(allocator, items.len),
+        .labels = if (items) |i| try ArrayList(*LabelWidget).initCapacity(allocator, i.len) else ArrayList(*LabelWidget).init(allocator),
         .allocator = allocator,
         .widget = .{ .rect = rect, .resizeFn = resizeFn, .paintFn = paintFn, .deinitFn = deinitFn },
     };
@@ -73,7 +73,7 @@ pub fn init(
     if (@typeInfo(@TypeOf(parent)) != .Null)
         parent.widget.addChild(&list_box_widget.widget);
 
-    for (items) |item|
+    if (items) |_items| for (_items) |item|
         try list_box_widget.addItem(item);
 
     return list_box_widget;
@@ -90,6 +90,15 @@ pub fn addItem(self: *ListBoxWidget, text: []const u8) !void {
     try self.labels.append(label);
 
     self.resize(self.relRect());
+}
+
+pub fn setTextColor(self: *ListBoxWidget, new_color: Color) void {
+    if (std.mem.eql(u8, std.mem.asBytes(&new_color), std.mem.asBytes(&self.text_color))) return;
+
+    for (self.labels.items) |label|
+        label.text_color = new_color;
+
+    self.text_color = new_color;
 }
 
 pub fn paint(self: *ListBoxWidget, d2d: *Direct2D) !void {
