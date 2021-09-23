@@ -1,5 +1,6 @@
 format: TextFormat,
 text_color: Color,
+options: LabelOptions,
 
 text_list: ArrayList(u8),
 allocator: *Allocator,
@@ -22,11 +23,19 @@ const SolidColorBrush = direct2d.SolidColorBrush;
 const TextFormat = direct2d.TextFormat;
 const RectF = direct2d.RectF;
 
+const LabelOptions = struct {
+    wrap_text: bool = false,
+};
+
 fn paintFn(w: *Widget, d2d: *Direct2D) anyerror!void {
     const self = @fieldParentPtr(LabelWidget, "widget", w);
 
     var text_brush = SolidColorBrush{ .color = self.text_color };
     defer text_brush.deinit();
+
+    // TODO: specify this when creating the format, or cache it somehow
+    try self.format.setWordWrapping(if (self.options.wrap_text) .WRAP else .NO_WRAP);
+
     try d2d.drawTextAlloc(self.allocator, self.text(), self.format, w.absRect(), &text_brush);
 }
 
@@ -38,7 +47,15 @@ fn deinitFn(w: *Widget) void {
     self.allocator.destroy(self);
 }
 
-pub fn init(allocator: *Allocator, rect: RectF, new_text: []const u8, format: TextFormat, text_color: Color, parent: anytype) !*LabelWidget {
+pub fn init(
+    allocator: *Allocator,
+    rect: RectF,
+    new_text: []const u8,
+    format: TextFormat,
+    text_color: Color,
+    options: LabelOptions,
+    parent: anytype,
+) !*LabelWidget {
     trace(@src(), .{ rect, parent });
 
     var label_widget = try allocator.create(LabelWidget);
@@ -46,6 +63,7 @@ pub fn init(allocator: *Allocator, rect: RectF, new_text: []const u8, format: Te
         .text_list = try ArrayList(u8).initCapacity(allocator, new_text.len),
         .format = format,
         .text_color = text_color,
+        .options = options,
         .allocator = allocator,
         .widget = .{ .rect = rect, .paintFn = paintFn, .deinitFn = deinitFn },
     };
@@ -70,8 +88,4 @@ pub fn setText(self: *LabelWidget, new_text: []const u8) !void {
 
 pub fn deinit(self: *LabelWidget) void {
     self.widget.deinit();
-}
-
-pub fn relRect(self: LabelWidget) RectF {
-    return self.widget.rect;
 }

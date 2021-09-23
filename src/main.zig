@@ -12,6 +12,7 @@ const BlockWidget = @import("widgets/BlockWidget.zig");
 const LabelWidget = @import("widgets/LabelWidget.zig");
 const ListBoxWidget = @import("widgets/ListBoxWidget.zig");
 const SplitWidget = @import("widgets/SplitWidget.zig");
+const ButtonWidget = @import("widgets/ButtonWidget.zig");
 
 const WINAPI = std.os.windows.WINAPI;
 const L = win32.zig.L;
@@ -24,6 +25,7 @@ pub const log_level: std.log.Level = .info;
 
 var window: win32_window.SimpleWindow = undefined;
 var d2d: direct2d.Direct2D = undefined;
+var tracking_mouse_event = false;
 
 const border_color = Color.fromU32(0x262C38FF);
 const primary_bg_color = Color.fromU32(0x0D1017FF);
@@ -32,10 +34,17 @@ const secondary_bg_color = Color.fromU32(0x0B0E14FF);
 const secondary_text_color = Color.fromU32(0x646B73FF);
 
 var text_format: direct2d.TextFormat = undefined;
+var centered_text_format: direct2d.TextFormat = undefined;
 
 const DirPane = struct {
+    split: *SplitWidget,
+
+    // top
     block: *BlockWidget,
     list: *ListBoxWidget,
+
+    // bottom
+    button: *ButtonWidget,
     // statusBar: *LabelWidget,
 };
 
@@ -90,13 +99,18 @@ const WmMsg = enum(u32) {
     KILL_FOCUS = wam.WM_KILLFOCUS,
     CHAR = wam.WM_CHAR,
     SYS_CHAR = wam.WM_SYSCHAR,
+    L_BUTTON_DOWN = wam.WM_LBUTTONDOWN,
+    MOUSE_MOVE = wam.WM_MOUSEMOVE,
+    MOUSE_LEAVE = win32.ui.controls.WM_MOUSELEAVE,
+    SET_CURSOR = wam.WM_SETCURSOR,
     _,
 };
 
 fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WINAPI) i32 {
     trace(@src(), .{@intToEnum(WmMsg, msg)});
 
-    switch (@intToEnum(WmMsg, msg)) {
+    const msg_type = @intToEnum(WmMsg, msg);
+    switch (msg_type) {
         .PAINT => {
             paint() catch |err| log.err("paint: {}", .{err});
             return -1;
@@ -129,6 +143,40 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
                 first_surrogate_half = 0;
             }
         },
+        .L_BUTTON_DOWN, .MOUSE_MOVE => {
+            if (!tracking_mouse_event) {
+                // cursor has just entered the client rect
+                const kmi = win32.ui.keyboard_and_mouse_input;
+                _ = kmi.TrackMouseEvent(&kmi.TRACKMOUSEEVENT{
+                    .cbSize = @sizeOf(kmi.TRACKMOUSEEVENT),
+                    .dwFlags = .LEAVE,
+                    .hwndTrack = window.handle,
+                    .dwHoverTime = 0,
+                });
+                _ = wam.SetCursor(wam.LoadCursor(null, wam.IDC_ARROW));
+                tracking_mouse_event = true;
+            }
+            const x_pixel_coord = @intCast(i16, win32_window.loword(l_param));
+            const y_pixel_coord = @intCast(i16, win32_window.hiword(l_param));
+
+            const di_point = direct2d.PointF{
+                .x = window.toDIPixels(x_pixel_coord),
+                .y = window.toDIPixels(y_pixel_coord),
+            };
+
+            const invalidate_window = switch (msg_type) {
+                .L_BUTTON_DOWN => app.main_widget.onMouseEvent(.Down, di_point),
+                .MOUSE_MOVE => app.main_widget.onMouseMove(di_point),
+                else => false,
+            };
+            if (invalidate_window) window.invalidate(.NO_ERASE) catch {};
+        },
+        .MOUSE_LEAVE => {
+            if (app.main_widget.onMouseMove(.{ .x = -1000, .y = -1000 }))
+                window.invalidate(.NO_ERASE) catch {};
+
+            tracking_mouse_event = false;
+        },
         else => return wam.DefWindowProc(hwnd, msg, w_param, l_param),
     }
 
@@ -155,6 +203,7 @@ fn toggleActivePane() void {
         app.right.block.bg_color = primary_bg_color;
         app.right.block.border_style = .{ .width = 1, .color = border_color };
         app.right.list.setTextColor(primary_text_color);
+        app.right.button.enabled = true;
     } else {
         app.active_pane = .Left;
         app.left.block.bg_color = primary_bg_color;
@@ -164,6 +213,7 @@ fn toggleActivePane() void {
         app.right.block.bg_color = secondary_bg_color;
         app.right.block.border_style = null;
         app.right.list.setTextColor(secondary_text_color);
+        app.right.button.enabled = false;
     }
     window.invalidate(.ERASE) catch {};
 }
@@ -221,9 +271,18 @@ fn populateDirEntries(path: []const u8, list_box: *ListBoxWidget) !void {
         .{ .iterate = true },
     );
 
+    var folder_pos: usize = 0;
+    var name_buf: [8096]u8 = undefined;
+
     var iter = dir.iterate();
     while (try iter.next()) |entry| {
-        try list_box.addItem(entry.name);
+        if (entry.kind == .Directory) {
+            const folder_name = try std.fmt.bufPrint(&name_buf, "📁 {s}", .{entry.name});
+            try list_box.insertItem(folder_pos, folder_name);
+            folder_pos += 1;
+        } else {
+            try list_box.appendItem(entry.name);
+        }
     }
 }
 
@@ -233,17 +292,25 @@ fn createWidgets() !*SplitWidget {
     app.main_widget = try SplitWidget.init(&gpa.allocator, .{}, .Horizontal, null);
 
     app.left = .{
+        .split = undefined,
         .block = try BlockWidget.init(&gpa.allocator, .{}, primary_bg_color, null),
         .list = try ListBoxWidget.init(&gpa.allocator, .{}, text_format, primary_text_color, null, app.left.block),
+        .button = undefined,
     };
     app.left.block.border_style = .{ .width = 1, .color = border_color };
     try app.main_widget.addWidget(app.left.block);
 
     app.right = .{
+        .split = try SplitWidget.init(&gpa.allocator, .{}, .Vertical, null),
         .block = try BlockWidget.init(&gpa.allocator, .{}, secondary_bg_color, null),
         .list = try ListBoxWidget.init(&gpa.allocator, .{}, text_format, secondary_text_color, null, app.right.block),
+        .button = try ButtonWidget.init(&gpa.allocator, .{}, centered_text_format, "Toggle pane (TAB)", .{}, null),
     };
-    try app.main_widget.addWidget(app.right.block);
+    app.right.button.enabled = false;
+    app.right.button.onClickFn = toggleActivePane;
+    try app.right.split.addWidget(app.right.block);
+    try app.right.split.addWidget(app.right.button);
+    try app.main_widget.addWidget(app.right.split);
 
     try populateDirEntries("C:\\", app.left.list);
     try populateDirEntries("D:\\dev\\source", app.right.list);
@@ -294,6 +361,11 @@ pub fn main() !void {
     // create a default font
     text_format = try d2d.createTextFormat("SegoeUI", 13.5);
     defer text_format.deinit();
+
+    // create a default font (but centered)
+    centered_text_format = try d2d.createTextFormat("SegoeUI", 14);
+    defer centered_text_format.deinit();
+    try centered_text_format.setAlignment(.{ .horizontal = .CENTER, .vertical = .CENTER });
 
     // show the window
     window.show();

@@ -48,7 +48,7 @@ fn deinitFn(w: *Widget) void {
 }
 
 pub fn init(allocator: *Allocator, rect: RectF, bg_color: Color, parent: anytype) !*BlockWidget {
-    trace(@src(), .{ rect, parent, bg_color });
+    trace(@src(), .{ rect, bg_color });
 
     var block_widget = try allocator.create(BlockWidget);
     block_widget.* = BlockWidget{
@@ -80,10 +80,4 @@ pub fn resize(self: *BlockWidget, new_rect: RectF) void {
     trace(@src(), .{new_rect});
 
     self.widget.resize(new_rect);
-}
-
-pub fn relRect(self: BlockWidget) RectF {
-    trace(@src(), .{});
-
-    return self.widget.rect;
 }

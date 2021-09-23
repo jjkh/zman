@@ -1,5 +1,6 @@
 text_format: TextFormat,
 text_color: Color,
+padding: f32 = 4,
 
 labels: ArrayList(*LabelWidget),
 allocator: *Allocator,
@@ -28,19 +29,19 @@ fn resizeFn(w: *Widget, new_rect: RectF) void {
     const self = @fieldParentPtr(ListBoxWidget, "widget", w);
     trace(@src(), .{ &self, new_rect, self.labels.items.len });
 
-    var label_rect = new_rect.size().toRect();
-    label_rect.bottom = LINE_SPACING;
+    var label_rect = new_rect.size().toRect().grow(-self.padding);
+    label_rect.bottom = self.padding + LINE_SPACING;
 
     for (self.labels.items) |label| {
-        label.widget.resize(label_rect);
-        label_rect.top += LINE_SPACING;
-        label_rect.bottom += LINE_SPACING;
+        // TODO: better culling somehow (inside Widget.paint?)
+        if (label_rect.bottom > self.widget.rect.bottom) {
+            label.widget.resize(.{ .top = -1000, .left = -1000 });
+        } else {
+            label.widget.resize(label_rect);
+            label_rect.top += self.padding + LINE_SPACING;
+            label_rect.bottom += self.padding + LINE_SPACING;
+        }
     }
-}
-
-fn paintFn(w: *Widget, _: *Direct2D) anyerror!void {
-    const self = @fieldParentPtr(ListBoxWidget, "widget", w);
-    trace(@src(), .{&self});
 }
 
 fn deinitFn(w: *Widget) void {
@@ -67,14 +68,14 @@ pub fn init(
         .text_color = text_color,
         .labels = if (items) |i| try ArrayList(*LabelWidget).initCapacity(allocator, i.len) else ArrayList(*LabelWidget).init(allocator),
         .allocator = allocator,
-        .widget = .{ .rect = rect, .resizeFn = resizeFn, .paintFn = paintFn, .deinitFn = deinitFn },
+        .widget = .{ .rect = rect, .resizeFn = resizeFn, .deinitFn = deinitFn },
     };
 
     if (@typeInfo(@TypeOf(parent)) != .Null)
         parent.widget.addChild(&list_box_widget.widget);
 
     if (items) |_items| for (_items) |item|
-        try list_box_widget.addItem(item);
+        try list_box_widget.appendItem(item);
 
     return list_box_widget;
 }
@@ -85,11 +86,19 @@ pub fn deinit(self: *ListBoxWidget) void {
     self.widget.deinit();
 }
 
-pub fn addItem(self: *ListBoxWidget, text: []const u8) !void {
-    var label = try LabelWidget.init(self.allocator, .{}, text, self.text_format, self.text_color, self);
+pub fn appendItem(self: *ListBoxWidget, text: []const u8) !void {
+    var label = try LabelWidget.init(self.allocator, .{}, text, self.text_format, self.text_color, .{}, self);
     try self.labels.append(label);
 
-    self.resize(self.relRect());
+    self.resize(self.widget.rect);
+}
+
+// NOTE: This is O(N)
+pub fn insertItem(self: *ListBoxWidget, pos: usize, text: []const u8) !void {
+    var label = try LabelWidget.init(self.allocator, .{}, text, self.text_format, self.text_color, .{}, self);
+    try self.labels.insert(pos, label);
+
+    self.resize(self.widget.rect);
 }
 
 pub fn setTextColor(self: *ListBoxWidget, new_color: Color) void {
@@ -111,10 +120,4 @@ pub fn resize(self: *ListBoxWidget, new_rect: RectF) void {
     trace(@src(), .{new_rect});
 
     self.widget.resize(new_rect);
-}
-
-pub fn relRect(self: ListBoxWidget) RectF {
-    trace(@src(), .{});
-
-    return self.widget.rect;
 }

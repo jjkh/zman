@@ -92,7 +92,7 @@ pub fn addWidget(self: *SplitWidget, new_widget: anytype) !void {
         return error.WidgetAlreadyHasParent;
 
     try self.inner_widgets.append(&new_widget.widget);
-    self.resize(self.relRect());
+    self.resize(self.widget.rect);
 }
 
 pub fn paint(self: *SplitWidget, d2d: *Direct2D) !void {
@@ -107,8 +107,14 @@ pub fn resize(self: *SplitWidget, new_rect: RectF) void {
     self.widget.resize(new_rect);
 }
 
-pub fn relRect(self: SplitWidget) RectF {
-    trace(@src(), .{});
+pub fn onMouseEvent(self: *SplitWidget, event: Widget.MouseEvent, point: PointF) bool {
+    trace(@src(), .{ event, point });
 
-    return self.widget.rect;
+    return self.widget.onMouseEvent(event, point);
+}
+
+pub fn onMouseMove(self: *SplitWidget, point: PointF) bool {
+    trace(@src(), .{point});
+
+    return self.widget.onMouseMove(point);
 }

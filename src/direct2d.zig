@@ -61,6 +61,13 @@ pub const PointF = struct {
             .y = (self.y + other.y) / 2,
         };
     }
+
+    pub fn format(self: PointF, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
+
+        try std.fmt.format(writer, "{{{d}, {d}}}", .{ self.x, self.y });
+    }
 };
 
 pub const Point = struct {
@@ -169,6 +176,10 @@ pub const RectF = struct {
 
     pub fn centerWithin(self: RectF, outer: RectF) RectF {
         return self.addPoint(outer.centerPoint().sub(self.centerPoint()));
+    }
+
+    pub fn contains(self: RectF, point: PointF) bool {
+        return point.x >= self.left and point.x <= self.right and point.y >= self.top and point.y <= self.bottom;
     }
 
     pub fn format(self: RectF, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
@@ -340,6 +351,22 @@ pub const TextFormat = struct {
         if (FAILED(self.text_format.IDWriteTextFormat_SetParagraphAlignment(options.vertical)))
             return error.SetParagraphAlignmentFailed;
     }
+
+    pub fn setWordWrapping(self: *TextFormat, wrap_style: DWRITE_WORD_WRAPPING) !void {
+        if (FAILED(self.text_format.IDWriteTextFormat_SetWordWrapping(wrap_style)))
+            return error.Failed;
+    }
+
+    pub fn setOverflow(self: *TextFormat, overflow: enum { Shown, Hidden }) !void {
+        var trim_style = DWRITE_TRIMMING{
+            .granularity = if (overflow == .Shown) .NONE else .CHARACTER,
+            .delimiter = 0,
+            .delimiterCount = 0,
+        };
+
+        if (FAILED(self.text_format.IDWriteTextFormat_SetTrimming(&trim_style, null)))
+            return error.Failed;
+    }
 };
 
 pub const TextLayout = struct {
@@ -472,8 +499,9 @@ pub const Direct2D = struct {
             log.crit("failed to create text format with font '{s}' and size {}", .{ font, size });
             return error.CreateTextFormatFailed;
         }
-
-        return TextFormat{ .text_format = text_format.? };
+        var format = TextFormat{ .text_format = text_format.? };
+        try format.setOverflow(.Hidden);
+        return format;
     }
 
     pub fn createTextLayout(self: *Direct2D, text: [:0]const u16, text_format: TextFormat, width: f32, height: f32) !TextLayout {
