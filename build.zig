@@ -16,7 +16,8 @@ pub fn build(b: *std.build.Builder) !void {
     const mode = b.standardReleaseOptions();
     const exe = b.addExecutable("zman", "src/main.zig");
 
-    if (mode != .Debug) exe.subsystem = .Windows;
+    // TODO: fix this
+    // if (mode != .Debug) exe.subsystem = .Windows;
 
     exe.linkLibC();
     exe.setTarget(target);

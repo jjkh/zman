@@ -24,11 +24,11 @@ const SplitOrientation = enum {
     Horizontal,
 };
 
-fn resizeFn(w: *Widget, new_rect: RectF) void {
+fn resizeFn(w: *Widget, new_rect: RectF) bool {
     const self = @fieldParentPtr(SplitWidget, "widget", w);
     trace(@src(), .{ &self, new_rect, self.inner_widgets.items.len });
 
-    if (self.inner_widgets.items.len == 0) return;
+    if (self.inner_widgets.items.len == 0) return false;
 
     const widget_count = @intToFloat(f32, self.inner_widgets.items.len);
     var size = new_rect.size().toRect();
@@ -45,6 +45,8 @@ fn resizeFn(w: *Widget, new_rect: RectF) void {
         inner_widget.resize(size);
         size = size.addPoint(offset);
     }
+
+    return false;
 }
 
 fn paintFn(w: *Widget, _: *Direct2D) anyerror!void {
@@ -68,7 +70,7 @@ pub fn init(allocator: *Allocator, rect: RectF, direction: SplitOrientation, par
         .inner_widgets = ArrayList(*Widget).init(allocator),
         .orientation = direction,
         .allocator = allocator,
-        .widget = .{ .rect = rect, .resizeFn = resizeFn, .paintFn = paintFn, .deinitFn = deinitFn },
+        .widget = .{ .abs_rect = rect, .resizeFn = resizeFn, .paintFn = paintFn, .deinitFn = deinitFn },
     };
 
     if (@typeInfo(@TypeOf(parent)) != .Null)
@@ -92,7 +94,7 @@ pub fn addWidget(self: *SplitWidget, new_widget: anytype) !void {
         return error.WidgetAlreadyHasParent;
 
     try self.inner_widgets.append(&new_widget.widget);
-    self.resize(self.widget.rect);
+    self.resize(self.widget.rect());
 }
 
 pub fn paint(self: *SplitWidget, d2d: *Direct2D) !void {

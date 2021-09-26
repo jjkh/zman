@@ -35,8 +35,8 @@ const ButtonStyle = struct {
     active_text_color: Color = Color.fromU32(0xBFBDB6FF),
     disabled_text_color: Color = Color.fromU32(0x22262BFF),
 
-    active_border: BlockWidget.BorderStyle = .{ .color = Color.fromU32(0x646B73FF), .width = 2 },
-    disabled_border: BlockWidget.BorderStyle = .{ .color = Color.fromU32(0x444B53FF), .width = 2 },
+    active_border: BlockWidget.BorderStyle = .{ .color = Color.fromU32(0x646B73FF), .width = 1 },
+    disabled_border: BlockWidget.BorderStyle = .{ .color = Color.fromU32(0x444B53FF), .width = 1 },
 };
 
 fn paintFn(w: *Widget, _: *Direct2D) !void {
@@ -102,7 +102,7 @@ pub fn init(
         .label = try LabelWidget.init(allocator, rect, text, text_format, style.active_text_color, .{}, null),
         .style = style,
         .allocator = allocator,
-        .widget = .{ .rect = rect, .onMouseEventFn = onMouseEventFn, .paintFn = paintFn, .deinitFn = deinitFn },
+        .widget = .{ .abs_rect = rect, .onMouseEventFn = onMouseEventFn, .paintFn = paintFn, .deinitFn = deinitFn },
     };
 
     button_widget.block.border_style = style.active_border;

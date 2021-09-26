@@ -36,7 +36,7 @@ fn paintFn(w: *Widget, d2d: *Direct2D) anyerror!void {
     // TODO: specify this when creating the format, or cache it somehow
     try self.format.setWordWrapping(if (self.options.wrap_text) .WRAP else .NO_WRAP);
 
-    try d2d.drawTextAlloc(self.allocator, self.text(), self.format, w.absRect(), &text_brush);
+    try d2d.drawTextAlloc(self.allocator, self.text(), self.format, w.windowRect(), &text_brush);
 }
 
 fn deinitFn(w: *Widget) void {
@@ -65,7 +65,7 @@ pub fn init(
         .text_color = text_color,
         .options = options,
         .allocator = allocator,
-        .widget = .{ .rect = rect, .paintFn = paintFn, .deinitFn = deinitFn },
+        .widget = .{ .abs_rect = rect, .paintFn = paintFn, .deinitFn = deinitFn },
     };
 
     label_widget.text_list.appendSliceAssumeCapacity(new_text);

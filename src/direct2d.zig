@@ -146,6 +146,15 @@ pub const RectF = struct {
         };
     }
 
+    pub fn offset(self: RectF, scalar: f32) RectF {
+        return .{
+            .top = self.top + scalar,
+            .bottom = self.bottom + scalar,
+            .left = self.left + scalar,
+            .right = self.right + scalar,
+        };
+    }
+
     pub fn topLeft(self: RectF) PointF {
         return .{
             .x = self.left,
@@ -167,10 +176,18 @@ pub const RectF = struct {
         };
     }
 
+    pub fn width(self: RectF) f32 {
+        return self.right - self.left;
+    }
+
+    pub fn height(self: RectF) f32 {
+        return self.bottom - self.top;
+    }
+
     pub fn size(self: RectF) PointF {
         return .{
-            .x = self.right - self.left,
-            .y = self.bottom - self.top,
+            .x = self.width(),
+            .y = self.height(),
         };
     }
 
@@ -209,6 +226,8 @@ pub const Color = struct {
     pub const Yellow = Color{ .r = 1, .g = 1, .b = 0 };
     pub const Magenta = Color{ .r = 1, .g = 0, .b = 1 };
     pub const Cyan = Color{ .r = 0, .g = 1, .b = 1 };
+
+    pub const Transparent = Color{ .r = 0, .g = 0, .b = 0, .a = 1 };
 
     pub fn fromU8(rgba: struct { r: u8, g: u8, b: u8, a: u8 = 255 }) Color {
         return .{
@@ -584,6 +603,22 @@ pub const Direct2D = struct {
             log.err("clear called but render target not initialised", .{});
     }
 
+    pub fn pushAxisAlignedClip(self: *Direct2D, rect: RectF) void {
+        trace(@src(), .{rect});
+
+        if (self.render_target) |render_target| {
+            render_target.ID2D1RenderTarget_PushAxisAlignedClip(&rect.toD2DRectF(), .PER_PRIMITIVE);
+        } else log.err("pushAxisAlignedClip called but render target not initialised", .{});
+    }
+
+    pub fn popAxisAlignedClip(self: *Direct2D) void {
+        trace(@src(), .{});
+
+        if (self.render_target) |render_target| {
+            render_target.ID2D1RenderTarget_PopAxisAlignedClip();
+        } else log.err("popAxisAlignedClip called but render target not initialised", .{});
+    }
+
     pub fn fillRect(self: *Direct2D, rect: RectF, brush: *SolidColorBrush) !void {
         trace(@src(), .{rect});
 
@@ -592,13 +627,30 @@ pub const Direct2D = struct {
         } else log.err("fillRect called but render target not initialised", .{});
     }
 
+    pub fn fillRoundedRect(self: *Direct2D, rect: RectF, brush: *SolidColorBrush, radius: f32) !void {
+        trace(@src(), .{rect});
+
+        if (self.render_target) |render_target| {
+            render_target.ID2D1RenderTarget_FillRoundedRectangle(&D2D1_ROUNDED_RECT{ .rect = rect.toD2DRectF(), .radiusX = radius, .radiusY = radius }, @ptrCast(*ID2D1Brush, try brush.brush(self, .REUSE)));
+        } else log.err("fillRoundedRect called but render target not initialised", .{});
+    }
+
     pub fn outlineRect(self: *Direct2D, rect: RectF, width: f32, brush: *SolidColorBrush) !void {
         trace(@src(), .{rect});
 
         if (self.render_target) |render_target|
-            render_target.ID2D1RenderTarget_DrawRectangle(&rect.toD2DRectF(), @ptrCast(*ID2D1Brush, try brush.brush(self, .REUSE)), width, null)
+            render_target.ID2D1RenderTarget_DrawRectangle(&rect.grow(-0.5).toD2DRectF(), @ptrCast(*ID2D1Brush, try brush.brush(self, .REUSE)), width, null)
         else
             log.err("outlineRect called but render target not initialised", .{});
+    }
+
+    pub fn outlineRoundedRect(self: *Direct2D, rect: RectF, width: f32, brush: *SolidColorBrush, radius: f32) !void {
+        trace(@src(), .{rect});
+
+        if (self.render_target) |render_target|
+            render_target.ID2D1RenderTarget_DrawRoundedRectangle(&D2D1_ROUNDED_RECT{ .rect = rect.grow(-0.5).toD2DRectF(), .radiusX = radius, .radiusY = radius }, @ptrCast(*ID2D1Brush, try brush.brush(self, .REUSE)), width, null)
+        else
+            log.err("outlineRoundedRect called but render target not initialised", .{});
     }
 
     pub fn getSize(self: *Direct2D) !PointF {

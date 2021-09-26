@@ -1,6 +1,6 @@
 // enable trace logging
 pub const TRACE = false;
-const trace = @import("trace.zig").trace;
+const SHOW_FPS = false;
 
 const std = @import("std");
 const assert = std.debug.assert;
@@ -22,6 +22,7 @@ const Color = direct2d.Color;
 
 const log = std.log.scoped(.default);
 pub const log_level: std.log.Level = .info;
+const trace = @import("trace.zig").trace;
 
 var window: win32_window.SimpleWindow = undefined;
 var d2d: direct2d.Direct2D = undefined;
@@ -53,6 +54,7 @@ var app = struct {
     left: DirPane = undefined,
     right: DirPane = undefined,
     active_pane: enum { Left, Right } = .Left,
+    fps_meter: *LabelWidget = undefined,
 }{};
 
 var first_surrogate_half: u16 = 0;
@@ -112,6 +114,16 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
     const msg_type = @intToEnum(WmMsg, msg);
     switch (msg_type) {
         .PAINT => {
+            var timer = std.time.Timer.start() catch unreachable;
+            defer {
+                if (SHOW_FPS) {
+                    const frame_time_us = @intToFloat(f32, timer.read() / 1000);
+                    var buf: [128]u8 = undefined;
+                    const fps_str = std.fmt.bufPrint(&buf, "{d:.0} FPS ({d:.2}ms)", .{ 100_0000 / frame_time_us, frame_time_us / 1000 }) catch unreachable;
+                    app.fps_meter.setText(fps_str) catch unreachable;
+                }
+            }
+
             paint() catch |err| log.err("paint: {}", .{err});
             return -1;
         },
@@ -203,7 +215,6 @@ fn toggleActivePane() void {
         app.right.block.bg_color = primary_bg_color;
         app.right.block.border_style = .{ .width = 1, .color = border_color };
         app.right.list.setTextColor(primary_text_color);
-        app.right.button.enabled = true;
     } else {
         app.active_pane = .Left;
         app.left.block.bg_color = primary_bg_color;
@@ -213,9 +224,8 @@ fn toggleActivePane() void {
         app.right.block.bg_color = secondary_bg_color;
         app.right.block.border_style = null;
         app.right.list.setTextColor(secondary_text_color);
-        app.right.button.enabled = false;
     }
-    window.invalidate(.ERASE) catch {};
+    window.invalidate(.NO_ERASE) catch {};
 }
 
 fn handleChar(char: []u16, flags: CharFlags) void {
@@ -271,7 +281,9 @@ fn populateDirEntries(path: []const u8, list_box: *ListBoxWidget) !void {
         .{ .iterate = true },
     );
 
-    var folder_pos: usize = 0;
+    try list_box.appendItem(" ↩  ..");
+
+    var folder_pos: usize = 1;
     var name_buf: [8096]u8 = undefined;
 
     var iter = dir.iterate();
@@ -286,10 +298,28 @@ fn populateDirEntries(path: []const u8, list_box: *ListBoxWidget) !void {
     }
 }
 
+fn scrollActivePane() void {
+    if (app.active_pane == .Left)
+        app.left.list.widget.offset = app.left.list.widget.offset.add(.{ .y = 10 })
+    else
+        app.right.list.widget.offset = app.right.list.widget.offset.add(.{ .y = 10 });
+
+    window.invalidate(.NO_ERASE) catch {};
+}
+
 fn createWidgets() !*SplitWidget {
     trace(@src(), .{});
 
     app.main_widget = try SplitWidget.init(&gpa.allocator, .{}, .Horizontal, null);
+
+    if (SHOW_FPS) {
+        // TODO: probably shouldn't be adding children directly to a split widget - could easily get confusing
+        // can we prevent this at compile/run time?
+
+        // make this first because children list is backwards and I want this on top
+        // TODO: fix this with Z-index or at least a doubly-linked list
+        app.fps_meter = try LabelWidget.init(&gpa.allocator, .{ .top = 0, .left = 0, .right = 200, .bottom = 200 }, "", text_format, Color.Magenta, .{}, app.main_widget);
+    }
 
     app.left = .{
         .split = undefined,
@@ -304,10 +334,10 @@ fn createWidgets() !*SplitWidget {
         .split = try SplitWidget.init(&gpa.allocator, .{}, .Vertical, null),
         .block = try BlockWidget.init(&gpa.allocator, .{}, secondary_bg_color, null),
         .list = try ListBoxWidget.init(&gpa.allocator, .{}, text_format, secondary_text_color, null, app.right.block),
-        .button = try ButtonWidget.init(&gpa.allocator, .{}, centered_text_format, "Toggle pane (TAB)", .{}, null),
+        .button = try ButtonWidget.init(&gpa.allocator, .{}, centered_text_format, "Scroll active pane", .{}, null),
     };
-    app.right.button.enabled = false;
-    app.right.button.onClickFn = toggleActivePane;
+
+    app.right.button.onClickFn = scrollActivePane;
     try app.right.split.addWidget(app.right.block);
     try app.right.split.addWidget(app.right.button);
     try app.main_widget.addWidget(app.right.split);
@@ -325,6 +355,7 @@ fn paint() !void {
     defer d2d.endDraw() catch {};
 
     d2d.clear(Color.DarkGray);
+    // TODO: only recalculate sizes if size has changed?
     try recalculateSizes();
 
     try app.main_widget.paint(&d2d);

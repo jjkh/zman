@@ -1,6 +1,7 @@
 bg_color: Color,
 border_style: ?BorderStyle = null,
 padding: f32 = 0,
+radius: f32 = 0,
 
 allocator: *Allocator,
 widget: Widget,
@@ -31,13 +32,29 @@ fn paintFn(w: *Widget, d2d: *Direct2D) anyerror!void {
 
     var bg_brush = SolidColorBrush{ .color = self.bg_color };
     defer bg_brush.deinit();
-    try d2d.fillRect(w.absRect(), &bg_brush);
+    if (self.radius == 0)
+        try d2d.fillRect(w.windowRect(), &bg_brush)
+    else
+        try d2d.fillRoundedRect(w.windowRect(), &bg_brush, self.radius);
 
     if (self.border_style) |border_style| {
         var border_brush = SolidColorBrush{ .color = border_style.color };
         defer border_brush.deinit();
-        try d2d.outlineRect(w.absRect(), border_style.width, &border_brush);
+        if (self.radius == 0)
+            try d2d.outlineRect(w.windowRect(), border_style.width, &border_brush)
+        else
+            try d2d.outlineRoundedRect(w.windowRect(), border_style.width, &border_brush, self.radius);
     }
+}
+
+fn resizeFn(w: *Widget, new_rect: RectF) bool {
+    const self = @fieldParentPtr(BlockWidget, "widget", w);
+    trace(@src(), .{&self});
+
+    if (self.border_style) |border_style|
+        self.widget.rect = new_rect.grow(-border_style.width / 2);
+
+    return true;
 }
 
 fn deinitFn(w: *Widget) void {
@@ -54,7 +71,7 @@ pub fn init(allocator: *Allocator, rect: RectF, bg_color: Color, parent: anytype
     block_widget.* = BlockWidget{
         .bg_color = bg_color,
         .allocator = allocator,
-        .widget = .{ .rect = rect, .paintFn = paintFn, .deinitFn = deinitFn },
+        .widget = .{ .abs_rect = rect, .paintFn = paintFn, .deinitFn = deinitFn },
     };
 
     if (@typeInfo(@TypeOf(parent)) != .Null) {
