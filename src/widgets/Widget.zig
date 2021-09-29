@@ -5,6 +5,7 @@ resizeFn: ?fn (*Widget, RectF) bool = null,
 onMouseEventFn: ?fn (*Widget, MouseEvent, PointF) bool = null,
 
 abs_rect: RectF,
+preferred_size: ?PointF = null,
 parent: ?*Widget = null,
 first_child: ?*Widget = null,
 next_sibling: ?*Widget = null,

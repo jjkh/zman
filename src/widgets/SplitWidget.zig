@@ -30,20 +30,89 @@ fn resizeFn(w: *Widget, new_rect: RectF) bool {
 
     if (self.inner_widgets.items.len == 0) return false;
 
-    const widget_count = @intToFloat(f32, self.inner_widgets.items.len);
-    var size = new_rect.size().toRect();
-    var offset = PointF{ .x = 0, .y = 0 };
-    if (self.orientation == .Vertical) {
-        size.bottom /= widget_count;
-        offset.y = size.bottom;
+    var variable_dist: f32 = undefined;
+    var variable_count: usize = 0;
+    if (self.orientation == .Horizontal) {
+        variable_dist = w.rect().width();
+        for (self.inner_widgets.items) |inner_widget| {
+            if (inner_widget.preferred_size) |preferred_size| {
+                if (preferred_size.x > 0) {
+                    variable_dist -= preferred_size.x;
+                    continue;
+                }
+            }
+
+            variable_count += 1;
+        }
     } else {
-        size.right /= widget_count;
-        offset.x = size.right;
+        variable_dist = w.rect().height();
+        for (self.inner_widgets.items) |inner_widget| {
+            if (inner_widget.preferred_size) |preferred_size| {
+                if (preferred_size.y > 0) {
+                    variable_dist -= preferred_size.y;
+                    continue;
+                }
+            }
+
+            variable_count += 1;
+        }
     }
 
-    for (self.inner_widgets.items) |inner_widget| {
-        inner_widget.resize(size);
-        size = size.addPoint(offset);
+    const single_dist = if (variable_count > 0) variable_dist / @intToFloat(f32, variable_count) else 0;
+
+    var offset: f32 = 0;
+    if (self.orientation == .Horizontal) {
+        for (self.inner_widgets.items) |inner_widget| {
+            var new_inner_rect = RectF{
+                .top = 0,
+                .bottom = w.rect().height(),
+                .left = offset,
+                .right = offset + single_dist,
+            };
+
+            if (inner_widget.preferred_size) |preferred_size| {
+                if (preferred_size.x > 0) {
+                    new_inner_rect.left = offset;
+                    new_inner_rect.right = offset + preferred_size.x;
+                }
+
+                if (preferred_size.y > 0) {
+                    const new_height = std.math.min(w.rect().height(), preferred_size.y);
+                    const y_offset = (w.rect().height() - new_height) / 2;
+                    new_inner_rect.top = y_offset;
+                    new_inner_rect.bottom = y_offset + new_height;
+                }
+            }
+
+            inner_widget.resize(new_inner_rect);
+            offset = new_inner_rect.right;
+        }
+    } else {
+        for (self.inner_widgets.items) |inner_widget| {
+            var new_inner_rect = RectF{
+                .top = offset,
+                .bottom = offset + single_dist,
+                .left = 0,
+                .right = w.rect().width(),
+            };
+
+            if (inner_widget.preferred_size) |preferred_size| {
+                if (preferred_size.y > 0) {
+                    new_inner_rect.top = offset;
+                    new_inner_rect.bottom = offset + preferred_size.y;
+                }
+
+                if (preferred_size.x > 0) {
+                    const new_width = std.math.min(w.rect().width(), preferred_size.x);
+                    const x_offset = (w.rect().width() - new_width) / 2;
+                    new_inner_rect.left = x_offset;
+                    new_inner_rect.right = x_offset + new_width;
+                }
+            }
+
+            inner_widget.resize(new_inner_rect);
+            offset = new_inner_rect.bottom;
+        }
     }
 
     return false;

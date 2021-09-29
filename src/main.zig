@@ -332,6 +332,7 @@ fn createWidgets() !*SplitWidget {
     app.right.setActive(.NotActive);
 
     app.right.button.onClickFn = scrollActivePane;
+    app.right.button.widget.preferred_size = .{ .x = -1, .y = 60 };
     try app.right.split.addWidget(app.right.block);
     try app.right.split.addWidget(app.right.button);
     try app.main_widget.addWidget(app.right.split);

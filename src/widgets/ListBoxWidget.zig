@@ -92,7 +92,6 @@ fn onMouseEventFn(w: *Widget, event: Widget.MouseEvent, point: PointF) bool {
     const self = @fieldParentPtr(ListBoxWidget, "widget", w);
     trace(@src(), .{&self});
 
-    log.info("{}", .{point});
     var maybe_item_at_point = self.itemAtPoint(point);
     switch (event) {
         .Down => self.selected_item = maybe_item_at_point,
@@ -157,7 +156,7 @@ fn makeItem(self: *ListBoxWidget, text: []const u8) !ListItem {
         .label = try LabelWidget.init(self.allocator, .{}, text, self.text_format, self.text_color, .{}, null),
     };
     list_item.block.widget.addChild(&list_item.label.widget);
-    list_item.block.radius = 5;
+    list_item.block.radius = 3;
 
     return list_item;
 }
