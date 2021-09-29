@@ -46,15 +46,33 @@ const DirPane = struct {
 
     // bottom
     button: *ButtonWidget,
-    // statusBar: *LabelWidget,
+    // status_bar: *StatusBarWidget,
+
+    pub fn setActive(self: DirPane, active: enum { Active, NotActive }) void {
+        if (active == .Active) {
+            self.block.bg_color = primary_bg_color;
+            self.block.border_style = .{ .width = 1, .color = border_color };
+            self.list.setTextColor(primary_text_color);
+        } else {
+            self.block.bg_color = secondary_bg_color;
+            self.block.border_style = null;
+            self.list.setTextColor(secondary_text_color);
+        }
+    }
 };
 
 var app = struct {
     main_widget: *SplitWidget = undefined,
     left: DirPane = undefined,
     right: DirPane = undefined,
-    active_pane: enum { Left, Right } = .Left,
+    active_pane: *const DirPane = undefined,
     fps_meter: *LabelWidget = undefined,
+
+    pub fn toggleActivePane(self: *@This()) void {
+        self.active_pane.setActive(.NotActive);
+        self.active_pane = if (self.active_pane == &self.left) &self.right else &self.left;
+        self.active_pane.setActive(.Active);
+    }
 }{};
 
 var first_surrogate_half: u16 = 0;
@@ -205,29 +223,6 @@ const CharFlags = packed struct {
     transition_state: enum(u1) { Released = 0, Pressed = 1 },
 };
 
-fn toggleActivePane() void {
-    if (app.active_pane == .Left) {
-        app.active_pane = .Right;
-        app.left.block.bg_color = secondary_bg_color;
-        app.left.block.border_style = null;
-        app.left.list.setTextColor(secondary_text_color);
-
-        app.right.block.bg_color = primary_bg_color;
-        app.right.block.border_style = .{ .width = 1, .color = border_color };
-        app.right.list.setTextColor(primary_text_color);
-    } else {
-        app.active_pane = .Left;
-        app.left.block.bg_color = primary_bg_color;
-        app.left.block.border_style = .{ .width = 1, .color = border_color };
-        app.left.list.setTextColor(primary_text_color);
-
-        app.right.block.bg_color = secondary_bg_color;
-        app.right.block.border_style = null;
-        app.right.list.setTextColor(secondary_text_color);
-    }
-    window.invalidate(.NO_ERASE) catch {};
-}
-
 fn handleChar(char: []u16, flags: CharFlags) void {
     var it = std.unicode.Utf16LeIterator.init(char);
     _ = flags;
@@ -244,7 +239,8 @@ fn handleChar(char: []u16, flags: CharFlags) void {
         //     text_changed = true;
         // },
         '\t' => {
-            toggleActivePane();
+            app.toggleActivePane();
+            window.invalidate(.NO_ERASE) catch {};
             return;
         },
         0x1B => {
@@ -299,11 +295,7 @@ fn populateDirEntries(path: []const u8, list_box: *ListBoxWidget) !void {
 }
 
 fn scrollActivePane() void {
-    if (app.active_pane == .Left)
-        app.left.list.widget.offset = app.left.list.widget.offset.add(.{ .y = 10 })
-    else
-        app.right.list.widget.offset = app.right.list.widget.offset.add(.{ .y = 10 });
-
+    app.active_pane.list.widget.offset = app.active_pane.list.widget.offset.add(.{ .y = 10 });
     window.invalidate(.NO_ERASE) catch {};
 }
 
@@ -327,15 +319,17 @@ fn createWidgets() !*SplitWidget {
         .list = try ListBoxWidget.init(&gpa.allocator, .{}, text_format, primary_text_color, null, app.left.block),
         .button = undefined,
     };
-    app.left.block.border_style = .{ .width = 1, .color = border_color };
+    app.active_pane = &app.left;
+    app.left.setActive(.Active);
     try app.main_widget.addWidget(app.left.block);
 
     app.right = .{
         .split = try SplitWidget.init(&gpa.allocator, .{}, .Vertical, null),
-        .block = try BlockWidget.init(&gpa.allocator, .{}, secondary_bg_color, null),
-        .list = try ListBoxWidget.init(&gpa.allocator, .{}, text_format, secondary_text_color, null, app.right.block),
+        .block = try BlockWidget.init(&gpa.allocator, .{}, Color.Red, null),
+        .list = try ListBoxWidget.init(&gpa.allocator, .{}, text_format, Color.Red, null, app.right.block),
         .button = try ButtonWidget.init(&gpa.allocator, .{}, centered_text_format, "Scroll active pane", .{}, null),
     };
+    app.right.setActive(.NotActive);
 
     app.right.button.onClickFn = scrollActivePane;
     try app.right.split.addWidget(app.right.block);
