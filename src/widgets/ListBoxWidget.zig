@@ -1,7 +1,7 @@
 text_format: TextFormat,
 text_color: Color,
-bg_color: Color = Color.fromU32(0x0D1017FF),
-padding: f32 = 4,
+bg_color: Color = Color.Transparent,
+padding: PointF = .{ .x = 8, .y = 4 },
 
 items: ArrayList(ListItem),
 allocator: *Allocator,
@@ -12,7 +12,6 @@ hovered_item: ?ListItem = null,
 
 const ListBoxWidget = @This();
 
-const trace = @import("../trace.zig").trace;
 const log = std.log.scoped(.ListBoxWidget);
 
 const std = @import("std");
@@ -39,16 +38,21 @@ const LINE_SPACING = 20;
 // TODO: not like this
 const SELECTED_COLOR = Color.fromU32(0x181C26FF);
 const HOVERED_COLOR = Color.fromU32(0x1B202AFF);
-const HOVERED_BORDER_STYLE = BlockWidget.BorderStyle{ .color = Color.fromU32(0x646B73FF), .width = 1 };
+const HOVERED_BORDER_COLOR = Color.fromU32(0x646B73FF);
+const BORDER_WIDTH = 1;
 
 fn resizeFn(w: *Widget, new_rect: RectF) bool {
     const self = @fieldParentPtr(ListBoxWidget, "widget", w);
-    trace(@src(), .{ &self, new_rect, self.items.items.len });
 
-    var block_rect = new_rect.size().toRect().grow(-1); // grow is workaround for outer border growing inwards >:(
-    block_rect.bottom = LINE_SPACING + self.padding * 2 + 1;
+    var block_rect = new_rect.size().toRect();
+    block_rect.bottom = LINE_SPACING + self.padding.y * 2;
 
-    const label_rect = block_rect.grow(-self.padding);
+    const label_rect = block_rect.add(.{
+        .top = self.padding.y,
+        .bottom = -self.padding.y,
+        .left = self.padding.x,
+        .right = -self.padding.x,
+    });
 
     for (self.items.items) |*list_item| {
         list_item.block.widget.resize(block_rect);
@@ -62,19 +66,20 @@ fn resizeFn(w: *Widget, new_rect: RectF) bool {
 
 fn paintFn(w: *Widget, _: *Direct2D) !void {
     const self = @fieldParentPtr(ListBoxWidget, "widget", w);
-    trace(@src(), .{&self});
 
-    for (self.items.items) |*list_item| {
+    for (self.items.items) |list_item| {
         list_item.block.bg_color = self.bg_color;
-        list_item.block.border_style = null;
+        list_item.block.border_style = .{ .color = self.bg_color, .width = BORDER_WIDTH };
     }
 
-    if (self.selected_item) |*selected_item|
+    if (self.selected_item) |selected_item| {
         selected_item.block.bg_color = SELECTED_COLOR;
+        selected_item.block.border_style = .{ .color = SELECTED_COLOR, .width = BORDER_WIDTH };
+    }
 
-    if (self.hovered_item) |*hovered_item| {
+    if (self.hovered_item) |hovered_item| {
         hovered_item.block.bg_color = HOVERED_COLOR;
-        hovered_item.block.border_style = HOVERED_BORDER_STYLE;
+        hovered_item.block.border_style = .{ .color = HOVERED_BORDER_COLOR, .width = BORDER_WIDTH };
     }
 }
 
@@ -90,7 +95,6 @@ fn itemAtPoint(self: ListBoxWidget, point: PointF) ?ListItem {
 // apply to the child blocks, but feels kinda gross
 fn onMouseEventFn(w: *Widget, event: Widget.MouseEvent, point: PointF) bool {
     const self = @fieldParentPtr(ListBoxWidget, "widget", w);
-    trace(@src(), .{&self});
 
     var maybe_item_at_point = self.itemAtPoint(point);
     switch (event) {
@@ -110,7 +114,6 @@ fn onMouseEventFn(w: *Widget, event: Widget.MouseEvent, point: PointF) bool {
 
 fn deinitFn(w: *Widget) void {
     const self = @fieldParentPtr(ListBoxWidget, "widget", w);
-    trace(@src(), .{&self});
 
     self.items.deinit();
     self.allocator.destroy(self);
@@ -124,8 +127,6 @@ pub fn init(
     items: ?[]const []const u8,
     parent: anytype,
 ) !*ListBoxWidget {
-    trace(@src(), .{ rect, parent });
-
     var list_box_widget = try allocator.create(ListBoxWidget);
     list_box_widget.* = ListBoxWidget{
         .text_format = text_format,
@@ -145,18 +146,18 @@ pub fn init(
 }
 
 pub fn deinit(self: *ListBoxWidget) void {
-    trace(@src(), .{});
-
     self.widget.deinit();
 }
 
 fn makeItem(self: *ListBoxWidget, text: []const u8) !ListItem {
+    const block = try BlockWidget.init(self.allocator, .{}, self.bg_color, self);
+    block.border_style = .{ .color = self.bg_color, .width = BORDER_WIDTH };
+    block.radius = 4;
+
     var list_item = .{
-        .block = try BlockWidget.init(self.allocator, .{}, self.bg_color, self),
-        .label = try LabelWidget.init(self.allocator, .{}, text, self.text_format, self.text_color, .{}, null),
+        .block = block,
+        .label = try LabelWidget.init(self.allocator, .{}, text, self.text_format, self.text_color, .{}, block),
     };
-    list_item.block.widget.addChild(&list_item.label.widget);
-    list_item.block.radius = 3;
 
     return list_item;
 }
@@ -184,13 +185,9 @@ pub fn setTextColor(self: *ListBoxWidget, new_color: Color) void {
 }
 
 pub fn paint(self: *ListBoxWidget, d2d: *Direct2D) !void {
-    trace(@src(), .{});
-
     return self.widget.paint(d2d);
 }
 
 pub fn resize(self: *ListBoxWidget, new_rect: RectF) void {
-    trace(@src(), .{new_rect});
-
     self.widget.resize(new_rect);
 }

@@ -14,7 +14,6 @@ mouse_inside: bool = false,
 const Widget = @This();
 const std = @import("std");
 const direct2d = @import("../direct2d.zig");
-const trace = @import("../trace.zig").trace;
 
 const Direct2D = direct2d.Direct2D;
 const PointF = direct2d.PointF;
@@ -30,8 +29,6 @@ pub const MouseEvent = enum {
 };
 
 pub fn deinit(self: *Widget) void {
-    trace(@src(), .{self});
-
     var it = self.first_child;
     while (it) |child| {
         it = child.next_sibling;
@@ -67,16 +64,12 @@ pub fn rect(self: Widget) RectF {
 }
 
 pub fn addChild(self: *Widget, child: *Widget) void {
-    trace(@src(), .{ self, child });
-
     child.parent = self;
     child.next_sibling = self.first_child;
     self.first_child = child;
 }
 
 pub fn resize(self: *Widget, new_rect: RectF) void {
-    trace(@src(), .{ self, new_rect });
-
     self.abs_rect = new_rect;
 
     if (self.resizeFn == null or self.resizeFn.?(self, self.rect())) {
@@ -86,7 +79,7 @@ pub fn resize(self: *Widget, new_rect: RectF) void {
     }
 }
 
-fn relRect(self: Widget, outer: RectF) RectF {
+pub fn relRect(self: Widget, outer: RectF) RectF {
     return outer.addPoint(self.rect().topLeft().neg());
 }
 

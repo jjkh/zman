@@ -11,7 +11,6 @@ widget: Widget,
 
 const ButtonWidget = @This();
 
-const trace = @import("../trace.zig").trace;
 const log = std.log.scoped(.ButtonWidget);
 
 const std = @import("std");
@@ -41,7 +40,6 @@ const ButtonStyle = struct {
 
 fn paintFn(w: *Widget, _: *Direct2D) !void {
     const self = @fieldParentPtr(ButtonWidget, "widget", w);
-    trace(@src(), .{&self});
 
     // TODO: probably cache this or something?
     if (self.enabled) {
@@ -63,7 +61,6 @@ fn paintFn(w: *Widget, _: *Direct2D) !void {
 
 fn onMouseEventFn(w: *Widget, event: Widget.MouseEvent, _: PointF) bool {
     const self = @fieldParentPtr(ButtonWidget, "widget", w);
-    trace(@src(), .{&self});
 
     return switch (event) {
         .Down => blk: {
@@ -81,7 +78,6 @@ fn onMouseEventFn(w: *Widget, event: Widget.MouseEvent, _: PointF) bool {
 
 fn deinitFn(w: *Widget) void {
     const self = @fieldParentPtr(ButtonWidget, "widget", w);
-    trace(@src(), .{&self});
 
     self.allocator.destroy(self);
 }
@@ -94,8 +90,6 @@ pub fn init(
     style: ButtonStyle,
     parent: anytype,
 ) !*ButtonWidget {
-    trace(@src(), .{ rect, parent });
-
     var button_widget = try allocator.create(ButtonWidget);
     button_widget.* = ButtonWidget{
         .block = try BlockWidget.init(allocator, rect, style.active_bg_color, null),
@@ -117,19 +111,13 @@ pub fn init(
 }
 
 pub fn deinit(self: *ButtonWidget) void {
-    trace(@src(), .{});
-
     self.widget.deinit();
 }
 
 pub fn paint(self: *ButtonWidget, d2d: *Direct2D) !void {
-    trace(@src(), .{});
-
     return self.widget.paint(d2d);
 }
 
 pub fn resize(self: *ButtonWidget, new_rect: RectF) void {
-    trace(@src(), .{new_rect});
-
     self.widget.resize(new_rect);
 }

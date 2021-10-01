@@ -8,12 +8,9 @@ usingnamespace win32.system.com;
 usingnamespace win32.graphics.direct2d;
 usingnamespace win32.graphics.direct_write;
 
-const trace = @import("trace.zig").trace;
 const SimpleWindow = @import("window.zig").SimpleWindow;
 
 fn safeRelease(ppT: anytype) void {
-    trace(@src(), .{});
-
     log.debug("releasing {s}", .{@typeName(@TypeOf(ppT.*.*))});
     _ = ppT.*.IUnknown_Release();
 }
@@ -227,7 +224,7 @@ pub const Color = struct {
     pub const Magenta = Color{ .r = 1, .g = 0, .b = 1 };
     pub const Cyan = Color{ .r = 0, .g = 1, .b = 1 };
 
-    pub const Transparent = Color{ .r = 0, .g = 0, .b = 0, .a = 1 };
+    pub const Transparent = Color{ .r = 0, .g = 0, .b = 0, .a = 0 };
 
     pub fn fromU8(rgba: struct { r: u8, g: u8, b: u8, a: u8 = 255 }) Color {
         return .{
@@ -311,15 +308,11 @@ pub const SolidColorBrush = struct {
     brush_ptr: ?*ID2D1SolidColorBrush = null,
 
     pub fn deinit(self: *SolidColorBrush) void {
-        trace(@src(), .{});
-
         if (self.brush_ptr) |*brush_ptr| safeRelease(brush_ptr);
         self.brush_ptr = null;
     }
 
     pub fn brush(self: *SolidColorBrush, d2d: *Direct2D, reuse_existing: enum { REUSE, RECREATE }) !*ID2D1SolidColorBrush {
-        trace(@src(), .{self.color});
-
         if (self.brush_ptr) |brush_ptr| {
             if (reuse_existing == .REUSE)
                 return brush_ptr;
@@ -355,8 +348,6 @@ pub const TextFormat = struct {
     text_format: *IDWriteTextFormat,
 
     pub fn deinit(self: *TextFormat) void {
-        trace(@src(), .{});
-
         safeRelease(&self.text_format);
     }
 
@@ -396,7 +387,6 @@ pub const TextLayout = struct {
     height: f32,
 
     pub fn deinit(self: *TextLayout) void {
-        trace(@src(), .{});
         safeRelease(&self.text_layout);
     }
 
@@ -430,8 +420,6 @@ pub const Direct2D = struct {
     /// creates "device-independent" the d2d1 and dwrite factories
     /// also initalises the "device-dependent" render target 
     pub fn init(window: SimpleWindow) !Direct2D {
-        trace(@src(), .{});
-
         var self = Direct2D{
             .d2d1_factory = undefined,
             .dwrite_factory = undefined,
@@ -465,8 +453,6 @@ pub const Direct2D = struct {
     /// TODO: how can I manage this better?
     /// render target - device-dependent
     pub fn initRenderTarget(self: *Direct2D) !void {
-        trace(@src(), .{});
-
         if (self.render_target != null)
             return;
 
@@ -487,8 +473,6 @@ pub const Direct2D = struct {
 
     // TODO: how can i also clear brushes, etc.?
     pub fn deinitRenderTarget(self: *Direct2D) void {
-        trace(@src(), .{});
-
         log.warn("Only releasing render target...", .{});
 
         if (self.render_target) |render_target|
@@ -499,8 +483,6 @@ pub const Direct2D = struct {
 
     /// device-independent
     pub fn createTextFormat(self: *Direct2D, comptime font: []const u8, size: f32) !TextFormat {
-        trace(@src(), .{});
-
         var text_format: ?*IDWriteTextFormat = undefined;
         const result = self.dwrite_factory.IDWriteFactory_CreateTextFormat(
             L(font),
@@ -550,16 +532,12 @@ pub const Direct2D = struct {
     }
 
     pub fn deinit(self: *Direct2D) void {
-        trace(@src(), .{});
-
         self.deinitRenderTarget();
         safeRelease(&self.d2d1_factory);
         safeRelease(&self.dwrite_factory);
     }
 
     pub fn beginDraw(self: *Direct2D) !void {
-        trace(@src(), .{});
-
         // initialise the render target in case it was destroyed last paint
         try self.initRenderTarget();
 
@@ -573,8 +551,6 @@ pub const Direct2D = struct {
     }
 
     pub fn endDraw(self: *Direct2D) !void {
-        trace(@src(), .{});
-
         defer self.window.endPaint();
         // if there is a failure to draw, destroy the render target and recreate next paint
         errdefer self.deinitRenderTarget();
@@ -595,8 +571,6 @@ pub const Direct2D = struct {
     }
 
     pub fn clear(self: *Direct2D, color: Color) void {
-        trace(@src(), .{color});
-
         if (self.render_target) |render_target|
             render_target.ID2D1RenderTarget_Clear(&color.toD2DColorF())
         else
@@ -604,58 +578,44 @@ pub const Direct2D = struct {
     }
 
     pub fn pushAxisAlignedClip(self: *Direct2D, rect: RectF) void {
-        trace(@src(), .{rect});
-
         if (self.render_target) |render_target| {
             render_target.ID2D1RenderTarget_PushAxisAlignedClip(&rect.toD2DRectF(), .PER_PRIMITIVE);
         } else log.err("pushAxisAlignedClip called but render target not initialised", .{});
     }
 
     pub fn popAxisAlignedClip(self: *Direct2D) void {
-        trace(@src(), .{});
-
         if (self.render_target) |render_target| {
             render_target.ID2D1RenderTarget_PopAxisAlignedClip();
         } else log.err("popAxisAlignedClip called but render target not initialised", .{});
     }
 
     pub fn fillRect(self: *Direct2D, rect: RectF, brush: *SolidColorBrush) !void {
-        trace(@src(), .{rect});
-
         if (self.render_target) |render_target| {
             render_target.ID2D1RenderTarget_FillRectangle(&rect.toD2DRectF(), @ptrCast(*ID2D1Brush, try brush.brush(self, .REUSE)));
         } else log.err("fillRect called but render target not initialised", .{});
     }
 
     pub fn fillRoundedRect(self: *Direct2D, rect: RectF, brush: *SolidColorBrush, radius: f32) !void {
-        trace(@src(), .{rect});
-
         if (self.render_target) |render_target| {
             render_target.ID2D1RenderTarget_FillRoundedRectangle(&D2D1_ROUNDED_RECT{ .rect = rect.toD2DRectF(), .radiusX = radius, .radiusY = radius }, @ptrCast(*ID2D1Brush, try brush.brush(self, .REUSE)));
         } else log.err("fillRoundedRect called but render target not initialised", .{});
     }
 
     pub fn outlineRect(self: *Direct2D, rect: RectF, width: f32, brush: *SolidColorBrush) !void {
-        trace(@src(), .{rect});
-
         if (self.render_target) |render_target|
-            render_target.ID2D1RenderTarget_DrawRectangle(&rect.grow(-0.5).toD2DRectF(), @ptrCast(*ID2D1Brush, try brush.brush(self, .REUSE)), width, null)
+            render_target.ID2D1RenderTarget_DrawRectangle(&rect.toD2DRectF(), @ptrCast(*ID2D1Brush, try brush.brush(self, .REUSE)), width, null)
         else
             log.err("outlineRect called but render target not initialised", .{});
     }
 
     pub fn outlineRoundedRect(self: *Direct2D, rect: RectF, width: f32, brush: *SolidColorBrush, radius: f32) !void {
-        trace(@src(), .{rect});
-
         if (self.render_target) |render_target|
-            render_target.ID2D1RenderTarget_DrawRoundedRectangle(&D2D1_ROUNDED_RECT{ .rect = rect.grow(-0.5).toD2DRectF(), .radiusX = radius, .radiusY = radius }, @ptrCast(*ID2D1Brush, try brush.brush(self, .REUSE)), width, null)
+            render_target.ID2D1RenderTarget_DrawRoundedRectangle(&D2D1_ROUNDED_RECT{ .rect = rect.toD2DRectF(), .radiusX = radius, .radiusY = radius }, @ptrCast(*ID2D1Brush, try brush.brush(self, .REUSE)), width, null)
         else
             log.err("outlineRoundedRect called but render target not initialised", .{});
     }
 
     pub fn getSize(self: *Direct2D) !PointF {
-        trace(@src(), .{});
-
         if (self.render_target) |render_target|
             return PointF.fromD2DSizeF(render_target.ID2D1RenderTarget_GetSize())
         else
@@ -663,8 +623,6 @@ pub const Direct2D = struct {
     }
 
     pub fn resize(self: *Direct2D) !void {
-        trace(@src(), .{});
-
         if (self.render_target) |render_target|
             _ = render_target.ID2D1HwndRenderTarget_Resize(&(try self.window.clientRect()).toSizeU())
         else
@@ -680,8 +638,6 @@ pub const Direct2D = struct {
         rect: RectF,
         brush: *SolidColorBrush,
     ) !void {
-        trace(@src(), .{text});
-
         if (self.render_target) |render_target|
             _ = render_target.ID2D1RenderTarget_DrawText(
                 text,
@@ -706,7 +662,6 @@ pub const Direct2D = struct {
         rect: RectF,
         brush: *SolidColorBrush,
     ) !void {
-        trace(@src(), .{text});
         const w_text = try std.unicode.utf8ToUtf16LeWithNull(allocator, text);
         defer allocator.free(w_text);
         try self.drawTextW(w_text, text_format, rect, brush);
@@ -732,8 +687,6 @@ pub const Direct2D = struct {
         origin: PointF,
         default_fill_brush: *SolidColorBrush,
     ) !void {
-        trace(@src(), .{});
-
         if (self.render_target) |render_target| {
             _ = render_target.ID2D1RenderTarget_DrawTextLayout(
                 .{ .x = origin.x, .y = origin.y },

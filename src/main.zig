@@ -1,5 +1,4 @@
 // enable trace logging
-pub const TRACE = false;
 const SHOW_FPS = false;
 
 const std = @import("std");
@@ -22,7 +21,6 @@ const Color = direct2d.Color;
 
 const log = std.log.scoped(.default);
 pub const log_level: std.log.Level = .info;
-const trace = @import("trace.zig").trace;
 
 var window: win32_window.SimpleWindow = undefined;
 var d2d: direct2d.Direct2D = undefined;
@@ -37,16 +35,53 @@ const secondary_text_color = Color.fromU32(0x646B73FF);
 var text_format: direct2d.TextFormat = undefined;
 var centered_text_format: direct2d.TextFormat = undefined;
 
+var fps_text_format: direct2d.TextFormat = undefined;
+var fps_meter: *LabelWidget = undefined;
+
+const StatusBar = struct {
+    block: *BlockWidget,
+    label: *LabelWidget,
+
+    pub fn init() !StatusBar {
+        const block = try BlockWidget.init(&gpa.allocator, .{}, secondary_bg_color, null);
+        // TODO: set preferred size based on line height
+        // this should probably be it's own widget? unsure
+        block.widget.preferred_size = .{ .y = 24 };
+        const label = try LabelWidget.init(&gpa.allocator, .{}, "", text_format, secondary_text_color, .{}, block);
+        label.widget.offset = .{ .x = 6, .y = 2.5 };
+        return StatusBar{
+            .block = block,
+            .label = label,
+        };
+    }
+};
+
 const DirPane = struct {
     split: *SplitWidget,
 
-    // top
+    location: StatusBar,
+
     block: *BlockWidget,
     list: *ListBoxWidget,
 
-    // bottom
-    button: *ButtonWidget,
-    // status_bar: *StatusBarWidget,
+    status_bar: StatusBar,
+
+    pub fn init() !DirPane {
+        const block = try BlockWidget.init(&gpa.allocator, .{}, primary_bg_color, null);
+        const dir_pane = DirPane{
+            .split = try SplitWidget.init(&gpa.allocator, .{}, .Vertical, null),
+            .location = try StatusBar.init(),
+            .block = block,
+            .list = try ListBoxWidget.init(&gpa.allocator, .{}, text_format, primary_text_color, null, block),
+            .status_bar = try StatusBar.init(),
+        };
+
+        try dir_pane.split.addWidget(dir_pane.location.block);
+        try dir_pane.split.addWidget(dir_pane.block);
+        try dir_pane.split.addWidget(dir_pane.status_bar.block);
+
+        return dir_pane;
+    }
 
     pub fn setActive(self: DirPane, active: enum { Active, NotActive }) void {
         if (active == .Active) {
@@ -55,9 +90,33 @@ const DirPane = struct {
             self.list.setTextColor(primary_text_color);
         } else {
             self.block.bg_color = secondary_bg_color;
-            self.block.border_style = null;
+            self.block.border_style = .{ .width = 1, .color = secondary_bg_color };
             self.list.setTextColor(secondary_text_color);
         }
+    }
+
+    fn populate(self: DirPane, path: []const u8) !void {
+        const dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
+
+        try self.list.appendItem(" ↩  ..");
+
+        var folder_pos: usize = 1;
+
+        var iter = dir.iterate();
+        while (try iter.next()) |entry| {
+            if (entry.kind == .Directory) {
+                try self.list.insertItem(folder_pos, "📁 ");
+                try self.list.items.items[folder_pos].label.text_list.appendSlice(entry.name);
+                folder_pos += 1;
+            } else {
+                try self.list.appendItem(entry.name);
+            }
+        }
+        try self.location.label.setText(path);
+
+        try self.status_bar.label.setText("");
+        const status_writer = self.status_bar.label.text_list.writer();
+        try status_writer.print("{d} items", .{self.list.items.items.len});
     }
 };
 
@@ -66,12 +125,21 @@ var app = struct {
     left: DirPane = undefined,
     right: DirPane = undefined,
     active_pane: *const DirPane = undefined,
-    fps_meter: *LabelWidget = undefined,
+
+    pub fn setActivePane(self: *@This(), pane: enum { Left, Right }) void {
+        if (pane == .Left) {
+            self.right.setActive(.NotActive);
+            self.active_pane = &self.left;
+        } else {
+            self.left.setActive(.NotActive);
+            self.active_pane = &self.right;
+        }
+
+        self.active_pane.setActive(.Active);
+    }
 
     pub fn toggleActivePane(self: *@This()) void {
-        self.active_pane.setActive(.NotActive);
-        self.active_pane = if (self.active_pane == &self.left) &self.right else &self.left;
-        self.active_pane.setActive(.Active);
+        self.setActivePane(if (self.active_pane == &self.left) .Right else .Left);
     }
 }{};
 
@@ -127,8 +195,6 @@ const WmMsg = enum(u32) {
 };
 
 fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WINAPI) i32 {
-    trace(@src(), .{@intToEnum(WmMsg, msg)});
-
     const msg_type = @intToEnum(WmMsg, msg);
     switch (msg_type) {
         .PAINT => {
@@ -138,14 +204,18 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
                     const frame_time_us = @intToFloat(f32, timer.read() / 1000);
                     var buf: [128]u8 = undefined;
                     const fps_str = std.fmt.bufPrint(&buf, "{d:.0} FPS ({d:.2}ms)", .{ 100_0000 / frame_time_us, frame_time_us / 1000 }) catch unreachable;
-                    app.fps_meter.setText(fps_str) catch unreachable;
+                    fps_meter.setText(fps_str) catch unreachable;
                 }
             }
 
             paint() catch |err| log.err("paint: {}", .{err});
-            return -1;
+            return 0;
         },
-        .SIZE => d2d.resize() catch |err| log.err("d2d.resize: {}", .{err}),
+        .SIZE => {
+            d2d.resize() catch |err| log.err("d2d.resize: {}", .{err});
+            recalculateSizes() catch |err| log.err("recalculateSizes: {}", .{err});
+            return 0;
+        },
         .DESTROY => {
             log.debug("destroying window", .{});
             wam.PostQuitMessage(0);
@@ -260,7 +330,6 @@ fn handleChar(char: []u16, flags: CharFlags) void {
 }
 
 // fn showCursor() !void {
-//     trace(@src(), .{});
 //     if (input_text_layout == null)
 //         return;
 
@@ -271,101 +340,42 @@ fn handleChar(char: []u16, flags: CharFlags) void {
 //     try caret.show();
 // }
 
-fn populateDirEntries(path: []const u8, list_box: *ListBoxWidget) !void {
-    const dir = try std.fs.cwd().openDir(
-        path,
-        .{ .iterate = true },
-    );
-
-    try list_box.appendItem(" ↩  ..");
-
-    var folder_pos: usize = 1;
-    var name_buf: [8096]u8 = undefined;
-
-    var iter = dir.iterate();
-    while (try iter.next()) |entry| {
-        if (entry.kind == .Directory) {
-            const folder_name = try std.fmt.bufPrint(&name_buf, "📁 {s}", .{entry.name});
-            try list_box.insertItem(folder_pos, folder_name);
-            folder_pos += 1;
-        } else {
-            try list_box.appendItem(entry.name);
-        }
-    }
-}
-
-fn scrollActivePane() void {
-    app.active_pane.list.widget.offset = app.active_pane.list.widget.offset.add(.{ .y = 10 });
-    window.invalidate(.NO_ERASE) catch {};
-}
-
 fn createWidgets() !*SplitWidget {
-    trace(@src(), .{});
-
     app.main_widget = try SplitWidget.init(&gpa.allocator, .{}, .Horizontal, null);
 
-    if (SHOW_FPS) {
-        // TODO: probably shouldn't be adding children directly to a split widget - could easily get confusing
-        // can we prevent this at compile/run time?
+    app.left = try DirPane.init();
+    try app.main_widget.addWidget(app.left.split);
 
-        // make this first because children list is backwards and I want this on top
-        // TODO: fix this with Z-index or at least a doubly-linked list
-        app.fps_meter = try LabelWidget.init(&gpa.allocator, .{ .top = 0, .left = 0, .right = 200, .bottom = 200 }, "", text_format, Color.Magenta, .{}, app.main_widget);
-    }
-
-    app.left = .{
-        .split = undefined,
-        .block = try BlockWidget.init(&gpa.allocator, .{}, primary_bg_color, null),
-        .list = try ListBoxWidget.init(&gpa.allocator, .{}, text_format, primary_text_color, null, app.left.block),
-        .button = undefined,
-    };
-    app.active_pane = &app.left;
-    app.left.setActive(.Active);
-    try app.main_widget.addWidget(app.left.block);
-
-    app.right = .{
-        .split = try SplitWidget.init(&gpa.allocator, .{}, .Vertical, null),
-        .block = try BlockWidget.init(&gpa.allocator, .{}, Color.Red, null),
-        .list = try ListBoxWidget.init(&gpa.allocator, .{}, text_format, Color.Red, null, app.right.block),
-        .button = try ButtonWidget.init(&gpa.allocator, .{}, centered_text_format, "Scroll active pane", .{}, null),
-    };
-    app.right.setActive(.NotActive);
-
-    app.right.button.onClickFn = scrollActivePane;
-    app.right.button.widget.preferred_size = .{ .x = -1, .y = 60 };
-    try app.right.split.addWidget(app.right.block);
-    try app.right.split.addWidget(app.right.button);
+    app.right = try DirPane.init();
     try app.main_widget.addWidget(app.right.split);
 
-    try populateDirEntries("C:\\", app.left.list);
-    try populateDirEntries("D:\\dev\\source", app.right.list);
+    try app.left.populate("C:\\");
+    try app.right.populate("D:\\dev\\source");
+    app.setActivePane(.Left);
 
     return app.main_widget;
 }
 
 fn paint() !void {
-    trace(@src(), .{});
-
     try d2d.beginDraw();
     defer d2d.endDraw() catch {};
 
     d2d.clear(Color.DarkGray);
-    // TODO: only recalculate sizes if size has changed?
-    try recalculateSizes();
 
     try app.main_widget.paint(&d2d);
-    log.debug("painted widget", .{});
+    if (SHOW_FPS)
+        try fps_meter.paint(&d2d);
 }
 
 fn recalculateSizes() !void {
-    trace(@src(), .{});
-
     const new_size = try d2d.getSize();
+
     app.main_widget.resize(new_size.toRect());
+    if (SHOW_FPS)
+        fps_meter.resize(new_size.toRect());
 }
 
 pub fn main() !void {
-    trace(@src(), .{});
     gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
 
@@ -385,7 +395,7 @@ pub fn main() !void {
     defer d2d.deinit();
 
     // create a default font
-    text_format = try d2d.createTextFormat("SegoeUI", 13.5);
+    text_format = try d2d.createTextFormat("SegoeUI", 14);
     defer text_format.deinit();
 
     // create a default font (but centered)
@@ -393,15 +403,24 @@ pub fn main() !void {
     defer centered_text_format.deinit();
     try centered_text_format.setAlignment(.{ .horizontal = .CENTER, .vertical = .CENTER });
 
+    // create a default font (but top right)
+    fps_text_format = try d2d.createTextFormat("SegoeUI", 14);
+    defer fps_text_format.deinit();
+    try fps_text_format.setAlignment(.{ .horizontal = .TRAILING });
+
+    // create the application UI
+    app.main_widget = try createWidgets();
+    if (SHOW_FPS)
+        fps_meter = try LabelWidget.init(&gpa.allocator, .{}, "", fps_text_format, Color.Green, .{}, null);
+
     // show the window
     window.show();
-
-    app.main_widget = try createWidgets();
-    log.debug("created widget", .{});
 
     // handle windows messages
     while (win32_window.processMessage()) {}
 
     // cleanup all widgets
     app.main_widget.deinit();
+    if (SHOW_FPS)
+        fps_meter.deinit();
 }

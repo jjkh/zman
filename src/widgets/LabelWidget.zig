@@ -8,7 +8,6 @@ widget: Widget,
 
 const LabelWidget = @This();
 
-const trace = @import("../trace.zig").trace;
 const log = std.log.scoped(.label);
 
 const std = @import("std");
@@ -41,7 +40,6 @@ fn paintFn(w: *Widget, d2d: *Direct2D) anyerror!void {
 
 fn deinitFn(w: *Widget) void {
     const self = @fieldParentPtr(LabelWidget, "widget", w);
-    trace(@src(), .{&self});
 
     self.text_list.deinit();
     self.allocator.destroy(self);
@@ -56,8 +54,6 @@ pub fn init(
     options: LabelOptions,
     parent: anytype,
 ) !*LabelWidget {
-    trace(@src(), .{ rect, parent });
-
     var label_widget = try allocator.create(LabelWidget);
     label_widget.* = LabelWidget{
         .text_list = try ArrayList(u8).initCapacity(allocator, new_text.len),
@@ -88,4 +84,12 @@ pub fn setText(self: *LabelWidget, new_text: []const u8) !void {
 
 pub fn deinit(self: *LabelWidget) void {
     self.widget.deinit();
+}
+
+pub fn resize(self: *LabelWidget, new_rect: RectF) void {
+    self.widget.resize(new_rect);
+}
+
+pub fn paint(self: *LabelWidget, d2d: *Direct2D) !void {
+    return self.widget.paint(d2d);
 }

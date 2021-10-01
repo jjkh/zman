@@ -6,7 +6,6 @@ widget: Widget,
 
 const SplitWidget = @This();
 
-const trace = @import("../trace.zig").trace;
 const log = std.log.scoped(.SplitWidget);
 
 const std = @import("std");
@@ -26,14 +25,13 @@ const SplitOrientation = enum {
 
 fn resizeFn(w: *Widget, new_rect: RectF) bool {
     const self = @fieldParentPtr(SplitWidget, "widget", w);
-    trace(@src(), .{ &self, new_rect, self.inner_widgets.items.len });
 
     if (self.inner_widgets.items.len == 0) return false;
 
     var variable_dist: f32 = undefined;
     var variable_count: usize = 0;
     if (self.orientation == .Horizontal) {
-        variable_dist = w.rect().width();
+        variable_dist = new_rect.width();
         for (self.inner_widgets.items) |inner_widget| {
             if (inner_widget.preferred_size) |preferred_size| {
                 if (preferred_size.x > 0) {
@@ -45,7 +43,7 @@ fn resizeFn(w: *Widget, new_rect: RectF) bool {
             variable_count += 1;
         }
     } else {
-        variable_dist = w.rect().height();
+        variable_dist = new_rect.height();
         for (self.inner_widgets.items) |inner_widget| {
             if (inner_widget.preferred_size) |preferred_size| {
                 if (preferred_size.y > 0) {
@@ -77,8 +75,8 @@ fn resizeFn(w: *Widget, new_rect: RectF) bool {
                 }
 
                 if (preferred_size.y > 0) {
-                    const new_height = std.math.min(w.rect().height(), preferred_size.y);
-                    const y_offset = (w.rect().height() - new_height) / 2;
+                    const new_height = std.math.min(new_rect.height(), preferred_size.y);
+                    const y_offset = (new_rect.height() - new_height) / 2;
                     new_inner_rect.top = y_offset;
                     new_inner_rect.bottom = y_offset + new_height;
                 }
@@ -93,7 +91,7 @@ fn resizeFn(w: *Widget, new_rect: RectF) bool {
                 .top = offset,
                 .bottom = offset + single_dist,
                 .left = 0,
-                .right = w.rect().width(),
+                .right = new_rect.width(),
             };
 
             if (inner_widget.preferred_size) |preferred_size| {
@@ -103,8 +101,8 @@ fn resizeFn(w: *Widget, new_rect: RectF) bool {
                 }
 
                 if (preferred_size.x > 0) {
-                    const new_width = std.math.min(w.rect().width(), preferred_size.x);
-                    const x_offset = (w.rect().width() - new_width) / 2;
+                    const new_width = std.math.min(new_rect.width(), preferred_size.x);
+                    const x_offset = (new_rect.width() - new_width) / 2;
                     new_inner_rect.left = x_offset;
                     new_inner_rect.right = x_offset + new_width;
                 }
@@ -118,28 +116,21 @@ fn resizeFn(w: *Widget, new_rect: RectF) bool {
     return false;
 }
 
-fn paintFn(w: *Widget, _: *Direct2D) anyerror!void {
-    const self = @fieldParentPtr(SplitWidget, "widget", w);
-    trace(@src(), .{&self});
-}
-
 fn deinitFn(w: *Widget) void {
     const self = @fieldParentPtr(SplitWidget, "widget", w);
-    trace(@src(), .{&self});
 
     self.inner_widgets.deinit();
     self.allocator.destroy(self);
 }
 
 pub fn init(allocator: *Allocator, rect: RectF, direction: SplitOrientation, parent: anytype) !*SplitWidget {
-    trace(@src(), .{ rect, parent });
-
     var split_widget = try allocator.create(SplitWidget);
+
     split_widget.* = SplitWidget{
         .inner_widgets = ArrayList(*Widget).init(allocator),
         .orientation = direction,
         .allocator = allocator,
-        .widget = .{ .abs_rect = rect, .resizeFn = resizeFn, .paintFn = paintFn, .deinitFn = deinitFn },
+        .widget = .{ .abs_rect = rect, .resizeFn = resizeFn, .deinitFn = deinitFn },
     };
 
     if (@typeInfo(@TypeOf(parent)) != .Null)
@@ -149,14 +140,10 @@ pub fn init(allocator: *Allocator, rect: RectF, direction: SplitOrientation, par
 }
 
 pub fn deinit(self: *SplitWidget) void {
-    trace(@src(), .{});
-
     self.widget.deinit();
 }
 
 pub fn addWidget(self: *SplitWidget, new_widget: anytype) !void {
-    trace(@src(), .{ self, &new_widget });
-
     if (new_widget.widget.parent == null)
         self.widget.addChild(&new_widget.widget)
     else
@@ -167,25 +154,17 @@ pub fn addWidget(self: *SplitWidget, new_widget: anytype) !void {
 }
 
 pub fn paint(self: *SplitWidget, d2d: *Direct2D) !void {
-    trace(@src(), .{});
-
     return self.widget.paint(d2d);
 }
 
 pub fn resize(self: *SplitWidget, new_rect: RectF) void {
-    trace(@src(), .{new_rect});
-
     self.widget.resize(new_rect);
 }
 
 pub fn onMouseEvent(self: *SplitWidget, event: Widget.MouseEvent, point: PointF) bool {
-    trace(@src(), .{ event, point });
-
     return self.widget.onMouseEvent(event, point);
 }
 
 pub fn onMouseMove(self: *SplitWidget, point: PointF) bool {
-    trace(@src(), .{point});
-
     return self.widget.onMouseMove(point);
 }
