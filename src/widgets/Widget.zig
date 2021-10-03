@@ -23,6 +23,7 @@ const log = std.log.scoped(.widget);
 pub const MouseEvent = enum {
     Down,
     Up,
+    DblClick,
     Enter,
     Leave,
     Move,

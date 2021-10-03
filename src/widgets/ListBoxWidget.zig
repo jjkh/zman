@@ -3,6 +3,10 @@ text_color: Color,
 bg_color: Color = Color.Transparent,
 padding: PointF = .{ .x = 8, .y = 4 },
 
+onHoverFn: ?fn (?ListItem) void = null,
+onSelectFn: ?fn (?ListItem) void = null,
+onActivateFn: ?fn (ListItem) void = null,
+
 items: ArrayList(ListItem),
 allocator: *Allocator,
 widget: Widget,
@@ -28,7 +32,7 @@ const TextFormat = direct2d.TextFormat;
 const PointF = direct2d.PointF;
 const RectF = direct2d.RectF;
 
-const ListItem = struct {
+pub const ListItem = struct {
     label: *LabelWidget,
     block: *BlockWidget,
 };
@@ -91,20 +95,30 @@ fn itemAtPoint(self: ListBoxWidget, point: PointF) ?ListItem {
     return null;
 }
 
+fn itemsEql(first: ?ListItem, second: ?ListItem) bool {
+    if (first == null and second == null) return true;
+    if (first != null and second != null and first.?.block == second.?.block) return true;
+
+    return false;
+}
+
 // alternative approach could have a mouseevent handler which we manually
 // apply to the child blocks, but feels kinda gross
 fn onMouseEventFn(w: *Widget, event: Widget.MouseEvent, point: PointF) bool {
     const self = @fieldParentPtr(ListBoxWidget, "widget", w);
 
-    var maybe_item_at_point = self.itemAtPoint(point);
+    const maybe_item_at_point = self.itemAtPoint(point);
     switch (event) {
-        .Down => self.selected_item = maybe_item_at_point,
-        .Move => {
-            if (maybe_item_at_point == null and self.hovered_item == null) return false;
-            if (maybe_item_at_point != null and self.hovered_item != null)
-                if (maybe_item_at_point.?.block == self.hovered_item.?.block) return false;
-
+        .DblClick => if (maybe_item_at_point) |list_item| {
+            if (self.onActivateFn != null) self.onActivateFn.?(list_item);
+        },
+        .Down => if (!itemsEql(maybe_item_at_point, self.selected_item)) {
+            self.selected_item = maybe_item_at_point;
+            if (self.onSelectFn != null) self.onSelectFn.?(self.selected_item);
+        },
+        .Move => if (!itemsEql(maybe_item_at_point, self.hovered_item)) {
             self.hovered_item = maybe_item_at_point;
+            if (self.onHoverFn != null) self.onHoverFn.?(self.hovered_item);
         },
         .Leave => self.hovered_item = null,
         else => return false,
@@ -173,6 +187,18 @@ pub fn insertItem(self: *ListBoxWidget, pos: usize, text: []const u8) !void {
     try self.items.insert(pos, try self.makeItem(text));
 
     self.resize(self.widget.rect());
+}
+
+pub fn clearItems(self: *ListBoxWidget) void {
+    for (self.items.items) |list_item| {
+        list_item.block.deinit();
+    }
+
+    self.hovered_item = null;
+    self.selected_item = null;
+    self.items.clearRetainingCapacity();
+
+    self.widget.first_child = null;
 }
 
 pub fn setTextColor(self: *ListBoxWidget, new_color: Color) void {

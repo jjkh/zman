@@ -113,7 +113,7 @@ pub const SimpleWindow = struct {
                 return error.SetDpiAwarenessFailed;
 
         const wnd_class = WNDCLASS{
-            .style = WNDCLASS_STYLES.initFlags(.{}),
+            .style = WNDCLASS_STYLES.initFlags(.{ .DBLCLKS = 1 }),
             .lpfnWndProc = window_proc,
             .cbClsExtra = 0,
             .cbWndExtra = 0,

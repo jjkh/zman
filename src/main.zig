@@ -64,7 +64,7 @@ const StatusBar = struct {
 };
 
 const DirPane = struct {
-    curr_path: []const u8 = undefined,
+    curr_path: [:0]const u8 = undefined,
     path_buf: [8096]u8 = undefined,
 
     split: *SplitWidget,
@@ -72,6 +72,10 @@ const DirPane = struct {
     block: *BlockWidget,
     list: *ListBoxWidget,
     status_bar: StatusBar,
+
+    // TODO: remove these when this is done properly
+    const DIR_PREFIX = "📁 ";
+    const BACK_PREFIX = " ↩  ";
 
     pub fn init() !DirPane {
         const block = try BlockWidget.init(&gpa.allocator, .{}, primary_bg_color, null);
@@ -82,7 +86,11 @@ const DirPane = struct {
             .list = try ListBoxWidget.init(&gpa.allocator, .{}, text_format, primary_text_color, null, block),
             .status_bar = try StatusBar.init(),
         };
-        dir_pane.curr_path = dir_pane.path_buf[0..0];
+
+        dir_pane.curr_path = "";
+        dir_pane.list.onSelectFn = onItemSelectFn;
+        dir_pane.list.onActivateFn = onItemActivateFn;
+
         try dir_pane.split.addWidget(dir_pane.location.block);
         try dir_pane.split.addWidget(dir_pane.block);
         try dir_pane.split.addWidget(dir_pane.status_bar.block);
@@ -99,15 +107,20 @@ const DirPane = struct {
             self.block.bg_color = secondary_bg_color;
             self.block.border_style = .{ .width = 1, .color = secondary_bg_color };
             self.list.setTextColor(secondary_text_color);
+            self.list.selected_item = null;
         }
     }
 
     pub fn updatePath(self: *DirPane, path: []const u8) !void {
         // normalize path for display
-        if (path.len > (self.path_buf.len - 1)) {
-            log.err("path is too long (max len is {d}, path is {d})", .{ (self.path_buf.len - 1), path.len });
+        if (path.len > (self.path_buf.len - 2)) {
+            log.err("path is too long (max len is {d}, path is {d})", .{ (self.path_buf.len - 2), path.len });
             return error.PathTooLong;
         }
+
+        // TODO: error handling here - high priority!
+        const dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
+
         std.mem.copy(u8, &self.path_buf, path);
 
         var new_path_len = try std.os.windows.normalizePath(u8, self.path_buf[0..path.len]);
@@ -115,19 +128,20 @@ const DirPane = struct {
             self.path_buf[new_path_len] = '\\';
             new_path_len += 1;
         }
-        self.curr_path = self.path_buf[0..new_path_len];
+        self.path_buf[new_path_len] = 0;
+
+        self.curr_path = self.path_buf[0..new_path_len :0];
         log.debug("{s} => {s}", .{ path, self.curr_path });
 
-        const dir = try std.fs.cwd().openDir(self.curr_path, .{ .iterate = true });
-
-        try self.list.appendItem(" ↩  ..");
+        self.list.clearItems();
+        try self.list.appendItem(BACK_PREFIX ++ "..");
 
         var folder_pos: usize = 1;
 
         var iter = dir.iterate();
         while (try iter.next()) |entry| {
             if (entry.kind == .Directory) {
-                try self.list.insertItem(folder_pos, "📁 ");
+                try self.list.insertItem(folder_pos, DIR_PREFIX);
                 try self.list.items.items[folder_pos].label.text_list.appendSlice(entry.name);
                 folder_pos += 1;
             } else {
@@ -140,13 +154,58 @@ const DirPane = struct {
         const status_writer = self.status_bar.label.text_list.writer();
         try status_writer.print("{d} items", .{self.list.items.items.len});
     }
+
+    fn onItemSelectFn(maybe_list_item: ?ListBoxWidget.ListItem) void {
+        if (maybe_list_item) |list_item| {
+            // TODO: fix this terrible, terrible hack
+            if (list_item.block.widget.parent.? == &app.left.list.widget)
+                app.setActivePane(.Left)
+            else
+                app.setActivePane(.Right);
+        }
+    }
+
+    fn onItemActivateFn(list_item: ListBoxWidget.ListItem) void {
+        // this is a very bad implementation of what i want to do here
+        // TODO: fix this
+        log.debug("activated '{s}' @ '{s}'", .{ list_item.label.text_list.items, app.active_pane.curr_path });
+        const list_text = list_item.label.text_list.items;
+
+        var buf: [8096]u8 = undefined;
+        std.mem.copy(u8, &buf, app.active_pane.curr_path);
+        var remaining_slice = buf[app.active_pane.curr_path.len..];
+        if (std.mem.startsWith(u8, list_text, DIR_PREFIX)) {
+            const dir_name = list_text[DIR_PREFIX.len..];
+            std.mem.copy(u8, remaining_slice, dir_name);
+            app.active_pane.updatePath(buf[0 .. app.active_pane.curr_path.len + dir_name.len]) catch |err| {
+                log.err("error updating path! {}", .{err});
+            };
+        } else if (std.mem.startsWith(u8, list_text, BACK_PREFIX)) {
+            std.mem.copy(u8, remaining_slice, "..");
+            app.active_pane.updatePath(buf[0 .. app.active_pane.curr_path.len + 2]) catch |err| {
+                log.err("error updating path! {}", .{err});
+            };
+        } else {
+            std.mem.copy(u8, &buf, list_text);
+            buf[list_text.len] = 0;
+
+            _ = win32.ui.shell.ShellExecuteA(
+                null, // no window (for now)
+                null, // use default verb
+                &buf,
+                null, // no parameters
+                app.active_pane.curr_path,
+                @enumToInt(win32.ui.windows_and_messaging.SW_NORMAL),
+            );
+        }
+    }
 };
 
 const App = struct {
     main_widget: *SplitWidget,
     left: DirPane,
     right: DirPane,
-    active_pane: *const DirPane = undefined,
+    active_pane: *DirPane = undefined,
 
     pub fn init() !App {
         const main_widget = try SplitWidget.init(&gpa.allocator, .{}, .Horizontal, null);
@@ -159,8 +218,6 @@ const App = struct {
         };
         try main_widget.addWidget(new_app.left.split);
         try main_widget.addWidget(new_app.right.split);
-
-        new_app.setActivePane(.Left);
 
         return new_app;
     }
@@ -234,7 +291,8 @@ const WmMsg = enum(u32) {
     KILL_FOCUS = wam.WM_KILLFOCUS,
     CHAR = wam.WM_CHAR,
     SYS_CHAR = wam.WM_SYSCHAR,
-    L_BUTTON_DOWN = wam.WM_LBUTTONDOWN,
+    L_BTN_DOWN = wam.WM_LBUTTONDOWN,
+    L_BTN_DBL_CLICK = wam.WM_LBUTTONDBLCLK,
     MOUSE_MOVE = wam.WM_MOUSEMOVE,
     MOUSE_LEAVE = win32.ui.controls.WM_MOUSELEAVE,
     SET_CURSOR = wam.WM_SETCURSOR,
@@ -279,7 +337,7 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
                 first_surrogate_half = 0;
             }
         },
-        .L_BUTTON_DOWN, .MOUSE_MOVE => {
+        .L_BTN_DOWN, .L_BTN_DBL_CLICK, .MOUSE_MOVE => {
             if (!tracking_mouse_event) {
                 // cursor has just entered the client rect
                 const kmi = win32.ui.keyboard_and_mouse_input;
@@ -301,7 +359,8 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
             };
 
             const invalidate_window = switch (msg_type) {
-                .L_BUTTON_DOWN => app.main_widget.onMouseEvent(.Down, di_point),
+                .L_BTN_DOWN => app.main_widget.onMouseEvent(.Down, di_point),
+                .L_BTN_DBL_CLICK => app.main_widget.onMouseEvent(.DblClick, di_point),
                 .MOUSE_MOVE => app.main_widget.onMouseMove(di_point),
                 else => false,
             };
@@ -444,13 +503,14 @@ pub fn main() !void {
     defer if (SHOW_FPS) fps_meter.deinit();
 
     // populate each pane with the directory contents
-    const left_dir = "C:";
+    const left_dir = "C:/";
     const right_dir = "C:/Users/Jamie/Downloads/..";
 
     app.left.updatePath(left_dir) catch |err| {
         log.crit("Couldn't open directory '{s}' in left pane ({}).", .{ left_dir, err });
         return;
     };
+    app.setActivePane(.Left);
 
     app.right.updatePath(right_dir) catch |err| {
         log.crit("Couldn't open directory '{s}' in right pane ({}).", .{ right_dir, err });

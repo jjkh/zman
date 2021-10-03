@@ -11,7 +11,7 @@ usingnamespace win32.graphics.direct_write;
 const SimpleWindow = @import("window.zig").SimpleWindow;
 
 fn safeRelease(ppT: anytype) void {
-    log.debug("releasing {s}", .{@typeName(@TypeOf(ppT.*.*))});
+    // log.debug("releasing {s}", .{@typeName(@TypeOf(ppT.*.*))});
     _ = ppT.*.IUnknown_Release();
 }
 
