@@ -79,6 +79,7 @@ const DirPane = struct {
 
     pub fn init() !DirPane {
         const block = try BlockWidget.init(&gpa.allocator, .{}, primary_bg_color, null);
+        block.scroll_pos = .{};
         var dir_pane = DirPane{
             .split = try SplitWidget.init(&gpa.allocator, .{}, .Vertical, null),
             .location = try StatusBar.init(),
@@ -134,6 +135,8 @@ const DirPane = struct {
         log.debug("{s} => {s}", .{ path, self.curr_path });
 
         self.list.clearItems();
+        self.block.scrollTo(0);
+
         try self.list.appendItem(BACK_PREFIX ++ "..");
 
         var folder_pos: usize = 1;
@@ -295,6 +298,7 @@ const WmMsg = enum(u32) {
     L_BTN_DBL_CLICK = wam.WM_LBUTTONDBLCLK,
     MOUSE_MOVE = wam.WM_MOUSEMOVE,
     MOUSE_LEAVE = win32.ui.controls.WM_MOUSELEAVE,
+    MOUSE_WHEEL = wam.WM_MOUSEWHEEL,
     SET_CURSOR = wam.WM_SETCURSOR,
     _,
 };
@@ -337,7 +341,7 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
                 first_surrogate_half = 0;
             }
         },
-        .L_BTN_DOWN, .L_BTN_DBL_CLICK, .MOUSE_MOVE => {
+        .L_BTN_DOWN, .L_BTN_DBL_CLICK, .MOUSE_MOVE, .MOUSE_WHEEL => {
             if (!tracking_mouse_event) {
                 // cursor has just entered the client rect
                 const kmi = win32.ui.keyboard_and_mouse_input;
@@ -350,8 +354,8 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
                 _ = wam.SetCursor(wam.LoadCursor(null, wam.IDC_ARROW));
                 tracking_mouse_event = true;
             }
-            const x_pixel_coord = @intCast(i16, win32_window.loword(l_param));
-            const y_pixel_coord = @intCast(i16, win32_window.hiword(l_param));
+            const x_pixel_coord = @bitCast(i16, win32_window.loword(l_param));
+            const y_pixel_coord = @bitCast(i16, win32_window.hiword(l_param));
 
             const di_point = direct2d.PointF{
                 .x = window.toDIPixels(x_pixel_coord),
@@ -362,6 +366,10 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
                 .L_BTN_DOWN => app.main_widget.onMouseEvent(.Down, di_point),
                 .L_BTN_DBL_CLICK => app.main_widget.onMouseEvent(.DblClick, di_point),
                 .MOUSE_MOVE => app.main_widget.onMouseMove(di_point),
+                .MOUSE_WHEEL => blk: {
+                    const wheel_delta = @bitCast(i16, win32_window.hiword(w_param));
+                    break :blk app.main_widget.onScroll(di_point, wheel_delta);
+                },
                 else => false,
             };
             if (invalidate_window) window.invalidate(.NO_ERASE) catch {};
@@ -504,7 +512,7 @@ pub fn main() !void {
 
     // populate each pane with the directory contents
     const left_dir = "C:/";
-    const right_dir = "C:/Users/Jamie/Downloads/..";
+    const right_dir = "C:/Users/Jamie/Downloads";
 
     app.left.updatePath(left_dir) catch |err| {
         log.crit("Couldn't open directory '{s}' in left pane ({}).", .{ left_dir, err });

@@ -86,12 +86,12 @@ pub fn processMessage() bool {
     return true;
 }
 
-pub inline fn hiword(value: anytype) @TypeOf(value) {
-    return (value >> 16) & 0x0000FFFF;
+pub inline fn hiword(value: anytype) u16 {
+    return @truncate(u16, @bitCast(usize, value) >> 16);
 }
 
-pub inline fn loword(value: anytype) @TypeOf(value) {
-    return value & 0x0000FFFF;
+pub inline fn loword(value: anytype) u16 {
+    return @truncate(u16, @bitCast(usize, value));
 }
 
 pub const SimpleWindow = struct {

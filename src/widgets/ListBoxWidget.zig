@@ -65,6 +65,8 @@ fn resizeFn(w: *Widget, new_rect: RectF) bool {
         block_rect = block_rect.addPoint(.{ .y = block_rect.height() });
     }
 
+    w.abs_rect.bottom = new_rect.top + block_rect.top;
+
     return false;
 }
 
@@ -112,9 +114,16 @@ fn onMouseEventFn(w: *Widget, event: Widget.MouseEvent, point: PointF) bool {
         .DblClick => if (maybe_item_at_point) |list_item| {
             if (self.onActivateFn != null) self.onActivateFn.?(list_item);
         },
-        .Down => if (!itemsEql(maybe_item_at_point, self.selected_item)) {
-            self.selected_item = maybe_item_at_point;
-            if (self.onSelectFn != null) self.onSelectFn.?(self.selected_item);
+        .Down => {
+            if (!itemsEql(maybe_item_at_point, self.selected_item)) {
+                self.selected_item = maybe_item_at_point;
+                if (self.onSelectFn != null) self.onSelectFn.?(self.selected_item);
+            }
+            if (maybe_item_at_point) |item| {
+                // this is just horrendous
+                const block = @fieldParentPtr(BlockWidget, "widget", self.widget.parent.?);
+                block.scrollIntoView(item.block.widget.abs_rect.addPoint(self.widget.offset).grow(self.padding.y / 2));
+            }
         },
         .Move => if (!itemsEql(maybe_item_at_point, self.hovered_item)) {
             self.hovered_item = maybe_item_at_point;
@@ -179,26 +188,25 @@ fn makeItem(self: *ListBoxWidget, text: []const u8) !ListItem {
 pub fn appendItem(self: *ListBoxWidget, text: []const u8) !void {
     try self.items.append(try self.makeItem(text));
 
-    self.resize(self.widget.rect());
+    self.resize(self.widget.abs_rect);
 }
 
 // NOTE: This is O(N)
 pub fn insertItem(self: *ListBoxWidget, pos: usize, text: []const u8) !void {
     try self.items.insert(pos, try self.makeItem(text));
 
-    self.resize(self.widget.rect());
+    self.resize(self.widget.abs_rect);
 }
 
 pub fn clearItems(self: *ListBoxWidget) void {
     for (self.items.items) |list_item| {
         list_item.block.deinit();
     }
+    self.widget.first_child = null;
 
     self.hovered_item = null;
     self.selected_item = null;
     self.items.clearRetainingCapacity();
-
-    self.widget.first_child = null;
 }
 
 pub fn setTextColor(self: *ListBoxWidget, new_color: Color) void {

@@ -2,6 +2,7 @@ bg_color: Color,
 border_style: ?BorderStyle = null,
 padding: f32 = 0,
 radius: f32 = 0,
+scroll_pos: ?PointF = null,
 
 allocator: *Allocator,
 widget: Widget,
@@ -18,6 +19,7 @@ const Allocator = std.mem.Allocator;
 const Direct2D = direct2d.Direct2D;
 const Color = direct2d.Color;
 const SolidColorBrush = direct2d.SolidColorBrush;
+const PointF = direct2d.PointF;
 const RectF = direct2d.RectF;
 
 pub const BorderStyle = struct {
@@ -71,12 +73,49 @@ fn deinitFn(w: *Widget) void {
     self.allocator.destroy(self);
 }
 
+pub fn scrollTo(self: *BlockWidget, new_scroll_pos: f32) void {
+    if (self.scroll_pos) |*scroll_pos| {
+        var total_child_height: f32 = 0;
+        {
+            var it = self.widget.first_child;
+            while (it) |child| : (it = child.next_sibling)
+                total_child_height += child.abs_rect.height();
+        }
+
+        scroll_pos.y = if (total_child_height > self.widget.abs_rect.height())
+            std.math.clamp(new_scroll_pos, -(total_child_height - self.widget.abs_rect.height()), 0)
+        else
+            0;
+
+        {
+            var it = self.widget.first_child;
+            while (it) |child| : (it = child.next_sibling)
+                child.offset.y = scroll_pos.y;
+        }
+    }
+}
+
+fn scrollBy(self: *BlockWidget, scroll_delta: f32) void {
+    if (self.scroll_pos) |*scroll_pos|
+        self.scrollTo(scroll_pos.y + scroll_delta);
+}
+
+fn onScrollFn(w: *Widget, _: PointF, wheel_delta: i32) bool {
+    const self = @fieldParentPtr(BlockWidget, "widget", w);
+    if (self.scroll_pos != null) {
+        self.scrollBy(@intToFloat(f32, @divTrunc(wheel_delta, 3)));
+        return true;
+    }
+
+    return false;
+}
+
 pub fn init(allocator: *Allocator, rect: RectF, bg_color: Color, parent: anytype) !*BlockWidget {
     var block_widget = try allocator.create(BlockWidget);
     block_widget.* = BlockWidget{
         .bg_color = bg_color,
         .allocator = allocator,
-        .widget = .{ .abs_rect = rect, .resizeFn = resizeFn, .paintFn = paintFn, .deinitFn = deinitFn },
+        .widget = .{ .abs_rect = rect, .resizeFn = resizeFn, .paintFn = paintFn, .deinitFn = deinitFn, .onScrollFn = onScrollFn },
     };
 
     if (@typeInfo(@TypeOf(parent)) != .Null) {
@@ -96,4 +135,13 @@ pub fn paint(self: *BlockWidget, d2d: *Direct2D) !void {
 
 pub fn resize(self: *BlockWidget, new_rect: RectF) void {
     self.widget.resize(new_rect);
+}
+
+pub fn scrollIntoView(self: *BlockWidget, rect: RectF) void {
+    if (self.scroll_pos != null) {
+        if (rect.top < 0)
+            self.scrollBy(-rect.top)
+        else if (rect.bottom > self.widget.rect().height())
+            self.scrollBy(self.widget.rect().height() - rect.bottom);
+    }
 }

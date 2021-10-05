@@ -3,6 +3,7 @@ paintFn: ?fn (*Widget, *Direct2D) anyerror!void = null,
 deinitFn: ?fn (*Widget) void = null,
 resizeFn: ?fn (*Widget, RectF) bool = null,
 onMouseEventFn: ?fn (*Widget, MouseEvent, PointF) bool = null,
+onScrollFn: ?fn (*Widget, PointF, i32) bool = null,
 
 abs_rect: RectF,
 preferred_size: ?PointF = null,
@@ -73,7 +74,7 @@ pub fn addChild(self: *Widget, child: *Widget) void {
 pub fn resize(self: *Widget, new_rect: RectF) void {
     self.abs_rect = new_rect;
 
-    if (self.resizeFn == null or self.resizeFn.?(self, self.rect())) {
+    if (self.resizeFn == null or self.resizeFn.?(self, new_rect)) {
         var it = self.first_child;
         while (it) |child| : (it = child.next_sibling)
             child.resize(self.relRect(self.rect()));
@@ -138,4 +139,17 @@ pub fn onMouseMove(self: *Widget, point: PointF) bool {
         ret = ret or child.onMouseMove(self.relPoint(point));
 
     return ret;
+}
+
+pub fn onScroll(self: *Widget, point: PointF, wheel_delta: i32) bool {
+    if (!self.rect().contains(point)) return false;
+
+    var it = self.first_child;
+    while (it) |child| : (it = child.next_sibling)
+        if (child.onScroll(self.relPoint(point), wheel_delta)) return true;
+
+    if (self.onScrollFn != null)
+        return self.onScrollFn.?(self, self.relPoint(point), wheel_delta);
+
+    return false;
 }
