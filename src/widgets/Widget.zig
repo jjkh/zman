@@ -81,12 +81,12 @@ pub fn resize(self: *Widget, new_rect: RectF) void {
     }
 }
 
-pub fn relRect(self: Widget, outer: RectF) RectF {
-    return outer.addPoint(self.rect().topLeft().neg());
+pub fn relRect(self: Widget, outer_rect: RectF) RectF {
+    return outer_rect.addPoint(self.rect().topLeft().neg());
 }
 
-fn relPoint(self: Widget, outer: PointF) PointF {
-    return outer.add(self.rect().topLeft().neg());
+fn relPoint(self: Widget, outer_point: PointF) PointF {
+    return outer_point.add(self.rect().topLeft().neg());
 }
 
 // TODO: the widget/window/offset coordinate systems are confusing and almost

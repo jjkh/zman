@@ -46,6 +46,11 @@ pub const Rect = struct {
     }
 };
 
+pub const Point = struct {
+    x: i32 = 0,
+    y: i32 = 0,
+};
+
 pub const Caret = struct {
     window: *SimpleWindow,
     width: f32,
@@ -170,7 +175,7 @@ pub const SimpleWindow = struct {
         }
 
         if (FAILED(CreateCaret(self.handle, null, self.toPhysicalPixels(width), self.toPhysicalPixels(height))))
-            return error.CreateCaretFailed;
+            return error.Failed;
 
         const _caret = Caret{ .window = self, .width = width, .height = height };
         self.caret = _caret;
@@ -193,9 +198,17 @@ pub const SimpleWindow = struct {
     pub fn clientRect(self: SimpleWindow) !Rect {
         var rect: RECT = undefined;
         if (GetClientRect(self.handle, &rect) == 0)
-            return error.GetClientRectFailed;
+            return error.Failed;
 
         return Rect.fromRECT(rect);
+    }
+
+    pub fn screenToClient(self: SimpleWindow, point: Point) !Point {
+        var win_point = POINT{ .x = point.x, .y = point.y };
+        if (ScreenToClient(self.handle, &win_point) == 0)
+            return error.Failed;
+
+        return Point{ .x = win_point.x, .y = win_point.y };
     }
 
     pub fn beginPaint(self: *SimpleWindow) void {
@@ -209,7 +222,7 @@ pub const SimpleWindow = struct {
 
     pub fn invalidate(self: *SimpleWindow, erase: enum { NO_ERASE, ERASE }) !void {
         if (FAILED(InvalidateRect(self.handle, null, if (erase == .NO_ERASE) 0 else 1)))
-            return error.InvalidateRectFailed;
+            return error.Failed;
     }
 
     pub fn deinit(self: *SimpleWindow) void {

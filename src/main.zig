@@ -308,7 +308,6 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
     switch (msg_type) {
         .PAINT => {
             paint() catch |err| log.err("paint: {}", .{err});
-            return 0;
         },
         .SIZE => {
             d2d.resize() catch |err| log.err("d2d.resize: {}", .{err});
@@ -341,7 +340,7 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
                 first_surrogate_half = 0;
             }
         },
-        .L_BTN_DOWN, .L_BTN_DBL_CLICK, .MOUSE_MOVE, .MOUSE_WHEEL => {
+        .L_BTN_DOWN, .L_BTN_DBL_CLICK, .MOUSE_MOVE => {
             if (!tracking_mouse_event) {
                 // cursor has just entered the client rect
                 const kmi = win32.ui.keyboard_and_mouse_input;
@@ -366,12 +365,24 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
                 .L_BTN_DOWN => app.main_widget.onMouseEvent(.Down, di_point),
                 .L_BTN_DBL_CLICK => app.main_widget.onMouseEvent(.DblClick, di_point),
                 .MOUSE_MOVE => app.main_widget.onMouseMove(di_point),
-                .MOUSE_WHEEL => blk: {
-                    const wheel_delta = @bitCast(i16, win32_window.hiword(w_param));
-                    break :blk app.main_widget.onScroll(di_point, wheel_delta);
-                },
                 else => false,
             };
+            if (invalidate_window) window.invalidate(.NO_ERASE) catch {};
+        },
+        .MOUSE_WHEEL => {
+            const x_pixel_coord = @bitCast(i16, win32_window.loword(l_param));
+            const y_pixel_coord = @bitCast(i16, win32_window.hiword(l_param));
+
+            const client_point = window.screenToClient(.{ .x = x_pixel_coord, .y = y_pixel_coord }) catch unreachable;
+
+            const di_point = direct2d.PointF{
+                .x = window.toDIPixels(client_point.x),
+                .y = window.toDIPixels(client_point.y),
+            };
+
+            const wheel_delta = @bitCast(i16, win32_window.hiword(w_param));
+            const invalidate_window = app.main_widget.onScroll(di_point, wheel_delta);
+
             if (invalidate_window) window.invalidate(.NO_ERASE) catch {};
         },
         .MOUSE_LEAVE => {
@@ -465,6 +476,7 @@ fn paint() !void {
 
 fn resize() !void {
     const new_rect = (try d2d.getSize()).toRect();
+    log.info("new_rect: {}", .{new_rect});
 
     app.resize(new_rect);
     if (SHOW_FPS) fps_meter.resize(new_rect);

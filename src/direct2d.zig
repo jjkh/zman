@@ -11,7 +11,6 @@ usingnamespace win32.graphics.direct_write;
 const SimpleWindow = @import("window.zig").SimpleWindow;
 
 fn safeRelease(ppT: anytype) void {
-    // log.debug("releasing {s}", .{@typeName(@TypeOf(ppT.*.*))});
     _ = ppT.*.IUnknown_Release();
 }
 
@@ -63,7 +62,7 @@ pub const PointF = struct {
         _ = fmt;
         _ = options;
 
-        try std.fmt.format(writer, "{{{d}, {d}}}", .{ self.x, self.y });
+        try std.fmt.format(writer, "{{x: {d}, y: {d}}}", .{ self.x, self.y });
     }
 };
 
@@ -200,7 +199,7 @@ pub const RectF = struct {
         _ = fmt;
         _ = options;
 
-        try std.fmt.format(writer, "{{{d}, {d}, {d}, {d}}}", .{ self.top, self.bottom, self.left, self.right });
+        try std.fmt.format(writer, "{{t: {d}, b: {d}, l: {d}, r: {d}}}", .{ self.top, self.bottom, self.left, self.right });
     }
 };
 
