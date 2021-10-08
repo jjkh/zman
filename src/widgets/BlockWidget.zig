@@ -4,6 +4,7 @@ padding: f32 = 0,
 radius: f32 = 0,
 scroll_pos: ?PointF = null,
 
+resizing_children: bool = false,
 allocator: *Allocator,
 widget: Widget,
 
@@ -22,25 +23,22 @@ const SolidColorBrush = direct2d.SolidColorBrush;
 const PointF = direct2d.PointF;
 const RectF = direct2d.RectF;
 
+const SCROLLBAR_THICKNESS = 12;
+const SCROLLBAR_PADDING = 1.5;
+const SCROLLBAR_BG_COLOR = Color.fromU32(0x0D1017FF);
+// const SCROLLBAR_BG_COLOR = Color.Transparent;
+const SCROLLBAR_FG_COLOR = Color.fromU32(0x22262EFF);
+
 pub const BorderStyle = struct {
     color: Color,
     width: f32,
 };
 
-fn paintFn(w: *Widget, d2d: *Direct2D) anyerror!void {
-    const self = @fieldParentPtr(BlockWidget, "widget", w);
-
-    var bg_brush = SolidColorBrush{ .color = self.bg_color };
-    defer bg_brush.deinit();
-    if (self.radius == 0)
-        try d2d.fillRect(w.windowRect(), &bg_brush)
-    else
-        try d2d.fillRoundedRect(w.windowRect(), &bg_brush, self.radius);
-
+fn paintBorder(self: *BlockWidget, d2d: *Direct2D) !void {
     if (self.border_style) |border_style| {
         // direct2d draws the outline centered on the rect which makes it hard to correctly size widgets
         // instead we offset the rect by the border width in resizeFn, and grow the rect to draw it here
-        const border_rect = w.windowRect().grow(border_style.width / 2);
+        const border_rect = self.widget.windowRect().grow(border_style.width / 2);
 
         // first, we need to remove the generic widget clipping rect (as that's for the inner dimension)
         d2d.popAxisAlignedClip();
@@ -53,18 +51,78 @@ fn paintFn(w: *Widget, d2d: *Direct2D) anyerror!void {
             try d2d.outlineRoundedRect(border_rect, border_style.width, &border_brush, self.radius);
 
         // now we re-add the inner clipping rect (so the border won't be drawn over by child widgets)
-        d2d.pushAxisAlignedClip(w.windowRect());
+        d2d.pushAxisAlignedClip(self.widget.windowRect());
     }
+}
+
+fn paintScrollbar(self: *BlockWidget, d2d: *Direct2D) !void {
+    if (self.scroll_pos) |scroll_pos| {
+        var scrollbar_rect = self.widget.windowRect();
+        const total_child_height = self.childHeight();
+
+        // if the children are smaller than the block, don't draw a scrollbar
+        // NOTE: this has to match the logic in resizeFn - better if it's calculated once instead
+        if (total_child_height < scrollbar_rect.height() or scrollbar_rect.height() <= 0)
+            return;
+
+        // draw backgound box for scrollbar
+        scrollbar_rect.left = scrollbar_rect.right - SCROLLBAR_THICKNESS;
+
+        var scrollbar_bg_brush = SolidColorBrush{ .color = SCROLLBAR_BG_COLOR };
+        defer scrollbar_bg_brush.deinit();
+        try d2d.fillRect(scrollbar_rect, &scrollbar_bg_brush);
+
+        // draw the scrollbar 'thumb'
+        const scroll_thumb_height = scrollbar_rect.height() * (scrollbar_rect.height() / total_child_height);
+        const scroll_thumb_top = -scroll_pos.y * (scrollbar_rect.height() / total_child_height);
+        scrollbar_rect.top = scrollbar_rect.top + scroll_thumb_top;
+        scrollbar_rect.bottom = scrollbar_rect.top + scroll_thumb_height;
+        scrollbar_rect = scrollbar_rect.grow(-SCROLLBAR_PADDING);
+
+        var scrollbar_fg_brush = SolidColorBrush{ .color = SCROLLBAR_FG_COLOR };
+        defer scrollbar_fg_brush.deinit();
+        try d2d.fillRoundedRect(scrollbar_rect, &scrollbar_fg_brush, SCROLLBAR_THICKNESS / 2.4);
+    }
+}
+
+fn paintFn(w: *Widget, d2d: *Direct2D) anyerror!void {
+    const self = @fieldParentPtr(BlockWidget, "widget", w);
+
+    var bg_brush = SolidColorBrush{ .color = self.bg_color };
+    defer bg_brush.deinit();
+    if (self.radius == 0)
+        try d2d.fillRect(w.windowRect(), &bg_brush)
+    else
+        try d2d.fillRoundedRect(w.windowRect(), &bg_brush, self.radius);
+
+    try self.paintBorder(d2d);
+    try self.paintScrollbar(d2d);
 }
 
 fn resizeFn(w: *Widget, new_rect: RectF) bool {
     const self = @fieldParentPtr(BlockWidget, "widget", w);
+    if (self.resizing_children) return true;
 
-    // this abs_rect is used to resize children, so it doesn't include the border width
-    if (self.border_style) |border_style|
-        w.abs_rect = new_rect.grow(-border_style.width);
+    // this rect is used to resize children, so it doesn't include the border width
+    const rect_excl_border = if (self.border_style) |border_style|
+        new_rect.grow(-border_style.width)
+    else
+        new_rect;
 
-    return true;
+    // if children_not_yet_resized is set, we remove the scrollbar width and call widget.resize() again to
+    // propagate that to the children
+    var child_rect = rect_excl_border;
+    if (self.scroll_pos != null) {
+        if (self.childHeight() > child_rect.height() and child_rect.height() > 0)
+            child_rect.right -= SCROLLBAR_THICKNESS;
+    }
+
+    self.resizing_children = true;
+    w.resize(child_rect);
+    self.resizing_children = false;
+
+    w.abs_rect = rect_excl_border;
+    return false;
 }
 
 fn deinitFn(w: *Widget) void {
@@ -73,14 +131,20 @@ fn deinitFn(w: *Widget) void {
     self.allocator.destroy(self);
 }
 
+fn childHeight(self: BlockWidget) f32 {
+    var total_child_height: f32 = 0;
+    {
+        var it = self.widget.first_child;
+        while (it) |child| : (it = child.next_sibling)
+            total_child_height += child.abs_rect.height();
+    }
+
+    return total_child_height;
+}
+
 pub fn scrollTo(self: *BlockWidget, new_scroll_pos: f32) void {
     if (self.scroll_pos) |*scroll_pos| {
-        var total_child_height: f32 = 0;
-        {
-            var it = self.widget.first_child;
-            while (it) |child| : (it = child.next_sibling)
-                total_child_height += child.abs_rect.height();
-        }
+        const total_child_height = self.childHeight();
 
         scroll_pos.y = if (total_child_height > self.widget.abs_rect.height())
             std.math.clamp(new_scroll_pos, -(total_child_height - self.widget.abs_rect.height()), 0)

@@ -28,9 +28,9 @@ var d2d: direct2d.Direct2D = undefined;
 var tracking_mouse_event = false;
 
 const border_color = Color.fromU32(0x262C38FF);
-const primary_bg_color = Color.fromU32(0x0D1017FF);
+const primary_bg_color = Color.fromU32(0x10141CFF);
 const primary_text_color = Color.fromU32(0xBFBDB6FF);
-const secondary_bg_color = Color.fromU32(0x0B0E14FF);
+const secondary_bg_color = Color.fromU32(0x0D1017FF);
 const secondary_text_color = Color.fromU32(0x646B73FF);
 
 var text_format: direct2d.TextFormat = undefined;
