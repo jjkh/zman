@@ -63,7 +63,7 @@ fn onMouseEventFn(w: *Widget, event: Widget.MouseEvent, _: PointF) bool {
     const self = @fieldParentPtr(ButtonWidget, "widget", w);
 
     return switch (event) {
-        .Down => blk: {
+        .Up => blk: {
             if (self.enabled and self.onClickFn != null) {
                 self.onClickFn.?();
                 break :blk true;

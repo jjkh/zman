@@ -23,16 +23,18 @@ const RectF = direct2d.RectF;
 const log = std.log.scoped(.default);
 pub const log_level: std.log.Level = .info;
 
-var window: win32_window.SimpleWindow = undefined;
-var d2d: direct2d.Direct2D = undefined;
-var tracking_mouse_event = false;
-
+// TODO: move to some sort of stylesheet (JSON probably?)
 const border_color = Color.fromU32(0x262C38FF);
 const primary_bg_color = Color.fromU32(0x10141CFF);
 const primary_text_color = Color.fromU32(0xBFBDB6FF);
 const secondary_bg_color = Color.fromU32(0x0D1017FF);
 const secondary_text_color = Color.fromU32(0x646B73FF);
 
+// TODO: these imports are awful. this needs to be fixed
+// TODO: also, maybe these can be moved to an explicit app state struct?
+var window: win32_window.SimpleWindow = undefined;
+var d2d: direct2d.Direct2D = undefined;
+var tracking_mouse_event = false;
 var text_format: direct2d.TextFormat = undefined;
 var centered_text_format: direct2d.TextFormat = undefined;
 
@@ -295,6 +297,7 @@ const WmMsg = enum(u32) {
     CHAR = wam.WM_CHAR,
     SYS_CHAR = wam.WM_SYSCHAR,
     L_BTN_DOWN = wam.WM_LBUTTONDOWN,
+    L_BTN_UP = wam.WM_LBUTTONUP,
     L_BTN_DBL_CLICK = wam.WM_LBUTTONDBLCLK,
     MOUSE_MOVE = wam.WM_MOUSEMOVE,
     MOUSE_LEAVE = win32.ui.controls.WM_MOUSELEAVE,
@@ -340,7 +343,7 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
                 first_surrogate_half = 0;
             }
         },
-        .L_BTN_DOWN, .L_BTN_DBL_CLICK, .MOUSE_MOVE => {
+        .MOUSE_MOVE => {
             if (!tracking_mouse_event) {
                 // cursor has just entered the client rect
                 const kmi = win32.ui.keyboard_and_mouse_input;
@@ -361,11 +364,25 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
                 .y = window.toDIPixels(y_pixel_coord),
             };
 
-            const invalidate_window = switch (msg_type) {
-                .L_BTN_DOWN => app.main_widget.onMouseEvent(.Down, di_point),
-                .L_BTN_DBL_CLICK => app.main_widget.onMouseEvent(.DblClick, di_point),
-                .MOUSE_MOVE => app.main_widget.onMouseMove(di_point),
-                else => false,
+            if (app.main_widget.onMouseMove(di_point))
+                window.invalidate(.NO_ERASE) catch {};
+        },
+        .L_BTN_DOWN, .L_BTN_UP, .L_BTN_DBL_CLICK => {
+            const x_pixel_coord = @bitCast(i16, win32_window.loword(l_param));
+            const y_pixel_coord = @bitCast(i16, win32_window.hiword(l_param));
+
+            const di_point = direct2d.PointF{
+                .x = window.toDIPixels(x_pixel_coord),
+                .y = window.toDIPixels(y_pixel_coord),
+            };
+
+            const invalidate_window = move_result: {
+                break :move_result switch (msg_type) {
+                    .L_BTN_DOWN => app.main_widget.onMouseEvent(.Down, di_point),
+                    .L_BTN_UP => app.main_widget.onMouseEvent(.Up, di_point),
+                    .L_BTN_DBL_CLICK => app.main_widget.onMouseEvent(.DblClick, di_point),
+                    else => false,
+                };
             };
             if (invalidate_window) window.invalidate(.NO_ERASE) catch {};
         },
@@ -476,7 +493,6 @@ fn paint() !void {
 
 fn resize() !void {
     const new_rect = (try d2d.getSize()).toRect();
-    log.info("new_rect: {}", .{new_rect});
 
     app.resize(new_rect);
     if (SHOW_FPS) fps_meter.resize(new_rect);

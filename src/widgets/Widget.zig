@@ -95,14 +95,14 @@ pub fn onMouseEvent(self: *Widget, event: MouseEvent, point: PointF) bool {
     if (!self.rect().contains(point)) return false;
 
     switch (event) {
-        // shouldn't call generic widget onMouseEvent for enter/leave/over
-        .Enter, .Leave, .Move => unreachable,
-        else => {},
+        // some messages are not propogated to children
+        .Enter, .Leave, .Move => {},
+        else => {
+            var it = self.first_child;
+            while (it) |child| : (it = child.next_sibling)
+                if (child.onMouseEvent(event, self.relPoint(point))) return true;
+        },
     }
-
-    var it = self.first_child;
-    while (it) |child| : (it = child.next_sibling)
-        if (child.onMouseEvent(event, self.relPoint(point))) return true;
 
     if (self.onMouseEventFn != null)
         return self.onMouseEventFn.?(self, event, self.relPoint(point));

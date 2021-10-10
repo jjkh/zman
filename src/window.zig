@@ -13,7 +13,7 @@ usingnamespace win32.ui.hi_dpi;
 usingnamespace win32.ui.windows_and_messaging;
 usingnamespace win32.graphics.gdi;
 
-// todo: move to common - reorganise types
+// TODO: move to common - reorganise types
 pub const Rect = struct {
     top: i32 = 0,
     bottom: i32 = 0,
@@ -43,6 +43,10 @@ pub const Rect = struct {
             .width = @intCast(u32, self.right - self.left),
             .height = @intCast(u32, self.bottom - self.top),
         };
+    }
+
+    pub fn contains(self: Rect, point: Point) bool {
+        return point.x >= self.left and point.x <= self.right and point.y >= self.top and point.y <= self.bottom;
     }
 };
 

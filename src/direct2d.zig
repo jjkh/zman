@@ -14,6 +14,7 @@ fn safeRelease(ppT: anytype) void {
     _ = ppT.*.IUnknown_Release();
 }
 
+// TODO: this logic should be generic...
 pub const PointF = struct {
     x: f32 = 0,
     y: f32 = 0,
@@ -71,6 +72,7 @@ pub const Point = struct {
     y: i32 = 0,
 };
 
+// TODO: this logic should be generic...
 pub const RectF = struct {
     top: f32 = 0,
     bottom: f32 = 0,
