@@ -4,6 +4,7 @@ deinitFn: ?fn (*Widget) void = null,
 resizeFn: ?fn (*Widget, RectF) bool = null,
 onMouseEventFn: ?fn (*Widget, MouseEvent, PointF) bool = null,
 onScrollFn: ?fn (*Widget, PointF, i32) bool = null,
+onDragEventFn: ?fn (*Widget, DragEvent, PointF, ?DragInfo) bool = null,
 
 abs_rect: RectF,
 preferred_size: ?PointF = null,
@@ -28,6 +29,17 @@ pub const MouseEvent = enum {
     Enter,
     Leave,
     Move,
+};
+
+pub const DragEvent = enum {
+    Start,
+    End,
+    Move,
+};
+
+pub const DragInfo = struct {
+    widget: *Widget,
+    from: PointF,
 };
 
 pub fn deinit(self: *Widget) void {
@@ -110,33 +122,63 @@ pub fn onMouseEvent(self: *Widget, event: MouseEvent, point: PointF) bool {
     return false;
 }
 
-pub fn onMouseMove(self: *Widget, point: PointF) bool {
-    const contains_point = self.rect().contains(point);
-    const has_handler = self.onMouseEventFn != null;
+pub fn onDragStart(self: *Widget, point: PointF) ?DragInfo {
+    if (!self.rect().contains(point))
+        return null;
 
-    if (!contains_point and !self.mouse_inside) return false;
-
-    var ret = false;
-
-    if (!contains_point and self.mouse_inside) {
-        self.mouse_inside = false;
-        if (has_handler)
-            ret = self.onMouseEventFn.?(self, .Leave, self.relPoint(point));
+    var it = self.first_child;
+    while (it) |child| : (it = child.next_sibling) {
+        const result = child.onDragStart(self.relPoint(point));
+        if (result != null) return result;
     }
 
-    if (contains_point and !self.mouse_inside) {
-        self.mouse_inside = true;
-        if (has_handler)
-            ret = self.onMouseEventFn.?(self, .Enter, self.relPoint(point));
-    }
+    if (self.onDragEventFn != null and self.onDragEventFn.?(self, .Start, self.relPoint(point), null))
+        return DragInfo{ .widget = self, .from = point };
 
-    if (contains_point and has_handler) {
-        ret = ret or self.onMouseEventFn.?(self, .Move, self.relPoint(point));
+    return null;
+}
+
+pub fn onDragEvent(self: *Widget, event: DragEvent, point: PointF, drag_info: DragInfo) bool {
+    if (event == .Start) {
+        log.crit("{*}: onDragEvent should not be called on drag start! [point={}, drag_info={}]", .{ self, point, drag_info });
+        unreachable;
     }
 
     var it = self.first_child;
     while (it) |child| : (it = child.next_sibling)
-        ret = ret or child.onMouseMove(self.relPoint(point));
+        if (child.onDragEvent(event, self.relPoint(point), drag_info)) return true;
+
+    if (self.onDragEventFn != null)
+        return self.onDragEventFn.?(self, event, self.relPoint(point), drag_info);
+
+    return false;
+}
+
+pub fn onMouseMove(self: *Widget, point: PointF) bool {
+    const contains_point = self.rect().contains(point);
+
+    if (!contains_point and !self.mouse_inside)
+        return false;
+
+    var ret = blk: {
+        if (!contains_point and self.mouse_inside) {
+            self.mouse_inside = false;
+            break :blk self.onMouseEvent(.Leave, point);
+        }
+        if (contains_point and !self.mouse_inside) {
+            self.mouse_inside = true;
+            break :blk self.onMouseEvent(.Enter, point);
+        }
+
+        break :blk false;
+    };
+
+    if (contains_point)
+        ret = self.onMouseEvent(.Move, point) or ret;
+
+    var it = self.first_child;
+    while (it) |child| : (it = child.next_sibling)
+        ret = child.onMouseMove(self.relPoint(point)) or ret;
 
     return ret;
 }

@@ -5,6 +5,7 @@ radius: f32 = 0,
 scroll_pos: ?PointF = null,
 
 resizing_children: bool = false,
+scroll_start_offset: f32 = 0,
 allocator: *Allocator,
 widget: Widget,
 
@@ -117,6 +118,7 @@ fn resizeFn(w: *Widget, new_rect: RectF) bool {
             child_rect.right -= SCROLLBAR_THICKNESS;
     }
 
+    // TODO: eww
     self.resizing_children = true;
     w.resize(child_rect);
     self.resizing_children = false;
@@ -174,12 +176,51 @@ fn onScrollFn(w: *Widget, _: PointF, wheel_delta: i32) bool {
     return false;
 }
 
+fn onDragEventFn(w: *Widget, event: Widget.DragEvent, point: PointF, _: ?Widget.DragInfo) bool {
+    const self = @fieldParentPtr(BlockWidget, "widget", w);
+    if (self.scroll_pos == null) return false;
+
+    switch (event) {
+        .Start => {
+            // TODO: logic (mostly) copied from paintFn, abstract this
+            var scrollbar_rect = self.widget.rect();
+            const total_child_height = self.childHeight();
+
+            if (total_child_height < scrollbar_rect.height() or scrollbar_rect.height() <= 0)
+                return false;
+
+            // TODO: this is a mess. fixing the different coordinate systems is high priority
+            scrollbar_rect.left = scrollbar_rect.right - SCROLLBAR_THICKNESS;
+            const scroll_thumb_top = -self.scroll_pos.?.y * (scrollbar_rect.height() / total_child_height) - w.windowRect().top;
+            const scroll_thumb_height = scrollbar_rect.height() * (scrollbar_rect.height() / total_child_height);
+            scrollbar_rect.top = scrollbar_rect.top + scroll_thumb_top;
+            scrollbar_rect.bottom = scrollbar_rect.top + scroll_thumb_height;
+
+            if (scrollbar_rect.contains(point)) {
+                self.scroll_start_offset = point.y - scrollbar_rect.top;
+                return true;
+            } else {
+                return false;
+            }
+        },
+        .Move, .End => {
+            var scrollbar_height = self.widget.windowRect().height();
+            const total_child_height = self.childHeight();
+            const dy = self.scroll_start_offset - point.y;
+            const new_scroll_y = dy * (total_child_height / scrollbar_height);
+            self.scrollTo(new_scroll_y);
+
+            return true;
+        },
+    }
+}
+
 pub fn init(allocator: *Allocator, rect: RectF, bg_color: Color, parent: anytype) !*BlockWidget {
     var block_widget = try allocator.create(BlockWidget);
     block_widget.* = BlockWidget{
         .bg_color = bg_color,
         .allocator = allocator,
-        .widget = .{ .abs_rect = rect, .resizeFn = resizeFn, .paintFn = paintFn, .deinitFn = deinitFn, .onScrollFn = onScrollFn },
+        .widget = .{ .abs_rect = rect, .resizeFn = resizeFn, .paintFn = paintFn, .deinitFn = deinitFn, .onScrollFn = onScrollFn, .onDragEventFn = onDragEventFn },
     };
 
     if (@typeInfo(@TypeOf(parent)) != .Null) {

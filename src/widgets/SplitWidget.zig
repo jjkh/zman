@@ -172,3 +172,11 @@ pub fn onMouseMove(self: *SplitWidget, point: PointF) bool {
 pub fn onScroll(self: *SplitWidget, point: PointF, wheel_delta: i32) bool {
     return self.widget.onScroll(point, wheel_delta);
 }
+
+pub fn onDragStart(self: *SplitWidget, point: PointF) ?Widget.DragInfo {
+    return self.widget.onDragStart(point);
+}
+
+pub fn onDragEvent(self: *SplitWidget, event: Widget.DragEvent, point: PointF, drag_info: Widget.DragInfo) bool {
+    return self.widget.onDragEvent(event, point, drag_info);
+}

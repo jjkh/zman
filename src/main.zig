@@ -6,6 +6,7 @@ const assert = std.debug.assert;
 const win32 = @import("win32");
 const win32_window = @import("window.zig");
 const direct2d = @import("direct2d.zig");
+const Widget = @import("widgets/Widget.zig");
 const BlockWidget = @import("widgets/BlockWidget.zig");
 const LabelWidget = @import("widgets/LabelWidget.zig");
 const ListBoxWidget = @import("widgets/ListBoxWidget.zig");
@@ -35,6 +36,10 @@ const secondary_text_color = Color.fromU32(0x646B73FF);
 var window: win32_window.SimpleWindow = undefined;
 var d2d: direct2d.Direct2D = undefined;
 var tracking_mouse_event = false;
+
+var mouse_down_point: ?win32_window.Point = null;
+var drag_info: ?Widget.DragInfo = null;
+
 var text_format: direct2d.TextFormat = undefined;
 var centered_text_format: direct2d.TextFormat = undefined;
 
@@ -344,9 +349,10 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
             }
         },
         .MOUSE_MOVE => {
+            const kmi = win32.ui.keyboard_and_mouse_input;
+
             if (!tracking_mouse_event) {
                 // cursor has just entered the client rect
-                const kmi = win32.ui.keyboard_and_mouse_input;
                 _ = kmi.TrackMouseEvent(&kmi.TRACKMOUSEEVENT{
                     .cbSize = @sizeOf(kmi.TRACKMOUSEEVENT),
                     .dwFlags = .LEAVE,
@@ -364,7 +370,36 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
                 .y = window.toDIPixels(y_pixel_coord),
             };
 
-            if (app.main_widget.onMouseMove(di_point))
+            if (mouse_down_point) |from_point| {
+                if (drag_info == null) {
+                    const x_drag_insensitivity = wam.GetSystemMetrics(.CXDRAG);
+                    const y_drag_insensitivity = wam.GetSystemMetrics(.CYDRAG);
+                    const drag_exclusion_rect = win32_window.Rect{
+                        .top = from_point.y - y_drag_insensitivity,
+                        .bottom = from_point.y + y_drag_insensitivity,
+                        .left = from_point.x - x_drag_insensitivity,
+                        .right = from_point.x + x_drag_insensitivity,
+                    };
+
+                    if (!drag_exclusion_rect.contains(.{ .x = x_pixel_coord, .y = y_pixel_coord })) {
+                        drag_info = app.main_widget.onDragStart(di_point);
+                        if (drag_info != null) {
+                            // also capture cursor
+                            _ = kmi.SetCapture(window.handle);
+                        } else {
+                            mouse_down_point = null;
+                        }
+                    }
+                }
+            }
+
+            var invalidate_window = app.main_widget.onMouseMove(di_point);
+
+            if (drag_info) |info|
+                // TODO: this will not allow for dragging between widgets
+                invalidate_window = info.widget.onDragEvent(.Move, di_point, info) or invalidate_window;
+
+            if (invalidate_window)
                 window.invalidate(.NO_ERASE) catch {};
         },
         .L_BTN_DOWN, .L_BTN_UP, .L_BTN_DBL_CLICK => {
@@ -376,13 +411,26 @@ fn windowProc(hwnd: HWND, msg: u32, w_param: usize, l_param: isize) callconv(WIN
                 .y = window.toDIPixels(y_pixel_coord),
             };
 
-            const invalidate_window = move_result: {
-                break :move_result switch (msg_type) {
-                    .L_BTN_DOWN => app.main_widget.onMouseEvent(.Down, di_point),
-                    .L_BTN_UP => app.main_widget.onMouseEvent(.Up, di_point),
-                    .L_BTN_DBL_CLICK => app.main_widget.onMouseEvent(.DblClick, di_point),
-                    else => false,
-                };
+            const invalidate_window = switch (msg_type) {
+                .L_BTN_DOWN => blk: {
+                    const invalidate = app.main_widget.onMouseEvent(.Down, di_point);
+                    mouse_down_point = .{ .x = x_pixel_coord, .y = y_pixel_coord };
+
+                    break :blk invalidate;
+                },
+                .L_BTN_UP => blk: {
+                    var invalidate = app.main_widget.onMouseEvent(.Up, di_point);
+
+                    if (drag_info) |info| {
+                        _ = win32.ui.keyboard_and_mouse_input.ReleaseCapture();
+                        invalidate = info.widget.onDragEvent(.End, di_point, info) or invalidate;
+                        drag_info = null;
+                    }
+                    mouse_down_point = null;
+                    break :blk invalidate;
+                },
+                .L_BTN_DBL_CLICK => app.main_widget.onMouseEvent(.DblClick, di_point),
+                else => false,
             };
             if (invalidate_window) window.invalidate(.NO_ERASE) catch {};
         },
@@ -484,8 +532,6 @@ fn paint() !void {
 
     try d2d.beginDraw();
     defer d2d.endDraw() catch |err| log.err("error '{}' on endDraw - should be recreating resources...", .{err});
-
-    d2d.clear(Color.DarkGray);
 
     try app.paint(&d2d);
     if (SHOW_FPS) try fps_meter.paint(&d2d);
